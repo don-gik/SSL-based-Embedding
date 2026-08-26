@@ -5,7 +5,7 @@ import torch
 from omegaconf import DictConfig
 from transformers import BertModel
 
-from src.system.layer import EmbeddingHead, replace_dropout_with_noise
+from src.system.layer import replace_dropout_with_noise
 from src.system.loss import simcse_loss
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,6 @@ class SimCSENoiseSystem(L.LightningModule):
         self.bert = BertModel.from_pretrained(
             "bert-base-uncased", attn_implementation=attn_mode
         )
-        self.embedding_head = EmbeddingHead()
 
         noise_std = cfg.get("noise_std", 0.01)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
@@ -30,23 +29,31 @@ class SimCSENoiseSystem(L.LightningModule):
         logger.info("SimCSE Noise System initialized.")
 
     def training_step(self, batch, batch_idx):
-        if batch_idx % 100 == 0:
+        if batch_idx % 1 == 0:
             logger.debug(f"Batch Index: {batch_idx}")
 
-        outputs1 = self.bert(
-            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
-        )
-        z1 = self.get_sentence_embedding(outputs1, batch)
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
 
-        outputs2 = self.bert(
-            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+        combined_input_ids = torch.cat([input_ids, input_ids], dim=0)
+        combined_attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
+
+        outputs = self.bert(
+            input_ids=combined_input_ids, attention_mask=combined_attention_mask
         )
-        z2 = self.get_sentence_embedding(outputs2, batch)
+
+        combined_embeddings = self.get_sentence_embedding(
+            outputs, {"attention_mask": combined_attention_mask}
+        )
+
+        batch_size = input_ids.size(0)
+        z1 = combined_embeddings[:batch_size]
+        z2 = combined_embeddings[batch_size:]
 
         temp = self.cfg.get("temperature", 0.05)
         loss = simcse_loss(z1, z2, temperature=temp)
 
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def get_sentence_embedding(self, outputs, batch):
@@ -58,4 +65,4 @@ class SimCSENoiseSystem(L.LightningModule):
         return sum_embeddings / sum_mask
 
     def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=self.cfg.lr)
+        return torch.optim.AdamW(self.parameters(), lr=self.cfg.get("lr", 3e-5))

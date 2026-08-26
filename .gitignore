@@ -1,3 +1,7 @@
 # Python
-__pycache__
-.venv
+__pycache__/
+.venv/
+outputs/
+lightning_logs/
+.ruff_cache/
+.dataset_cache/

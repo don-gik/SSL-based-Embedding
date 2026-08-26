@@ -12,9 +12,12 @@ logger = logging.getLogger(__name__)
 def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased", batch_size=32, cache_dir="./.dataset_cache"
 ):
-    tokenizer = BertTokenizerFast.from_pretrained(model_name)
+    nltk.download("punkt_tab", quiet=True)
 
-    raw_datasets = load_dataset("wikitext", "wikitext-2-raw-v1", cache_dir=cache_dir)
+    tokenizer = BertTokenizerFast.from_pretrained(model_name)
+    raw_datasets = load_dataset(
+        "Salesforce/wikitext", "wikitext-2-raw-v1", cache_dir=cache_dir
+    )
 
     def chunk_to_sentences(batch):
         all_sentences = []
