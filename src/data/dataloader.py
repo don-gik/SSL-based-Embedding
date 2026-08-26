@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased", batch_size=32, cache_dir="./.dataset_cache"
 ):
-    nltk.download("punkt_tab", quiet=True)
+    # nltk.download("punkt_tab", quiet=True)
 
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
