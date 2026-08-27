@@ -108,3 +108,23 @@ class SigmoidDinoLoss(nn.Module):
             self.center = batch_center
         else:
             self.center = self.center * 0.9 + batch_center * 0.1
+
+
+class CovarianceLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        num_features = z.size(1)
+
+        # Feature-wise Centering
+        z_centered = z - z.mean(dim=0, keepdim=True)
+
+        # 768 x 768 Covariance
+        cov_matrix = (z_centered.T @ z_centered) / (z.size(0) - 1)
+
+        off_diag_cov = cov_matrix.pow(2)
+        off_diag_cov.fill_diagonal_(0)
+
+        cov_loss = off_diag_cov.sum() / num_features
+        return cov_loss

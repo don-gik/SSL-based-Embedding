@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import change_noise_std, replace_dropout_with_noise
-from src.system.loss import SigmoidDinoLoss
+from src.system.loss import CovarianceLoss, SigmoidDinoLoss
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class SigDinoNoiseSystem(L.LightningModule):
         self.model_card_data = None
 
         self.sigdinoloss = SigmoidDinoLoss(out_dim=out_dim)
+        self.covarianceloss = CovarianceLoss()
 
         logger.info("Sigmoid Dino Noise System initialized.")
 
@@ -68,7 +69,9 @@ class SigDinoNoiseSystem(L.LightningModule):
                 output2, {"attention_mask": attention_mask}
             )
 
-        loss = self.sigdinoloss(embedding1, embedding2, self.global_step)
+        loss = self.sigdinoloss(
+            embedding1, embedding2, self.global_step
+        ) + self.covarianceloss(embedding1)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
