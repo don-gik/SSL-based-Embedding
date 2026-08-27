@@ -4,18 +4,17 @@ import logging
 import lightning as L
 import numpy as np
 import torch
-import torch.nn.functional as F
 from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import change_noise_std, replace_dropout_with_noise
-from src.system.loss import GramDiLoss
+from src.system.loss import SigmoidDinoLoss
 
 logger = logging.getLogger(__name__)
 
 
-class GramDiNoiseSystem(L.LightningModule):
+class SigDinoNoiseSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
@@ -29,6 +28,8 @@ class GramDiNoiseSystem(L.LightningModule):
         ).train()
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
+        out_dim = self.bert.config.hidden_size
+
         noise_std = cfg.get("noise_std", 0.05)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
 
@@ -37,14 +38,14 @@ class GramDiNoiseSystem(L.LightningModule):
 
         teacher_noise_std = cfg.get("teacher_noise_std", 0.01)
         change_noise_std(self.teacher_bert, new_std=teacher_noise_std)
-        self.teacher_bert.eval()
+        self.teacher_bert.train()
 
         self.evaluator = Evaluator()
         self.model_card_data = None
 
-        self.gramdi_loss = GramDiLoss()
+        self.sigdinoloss = SigmoidDinoLoss(out_dim=out_dim)
 
-        logger.info("SimCSE Noise System initialized.")
+        logger.info("Sigmoid Dino Noise System initialized.")
 
     def on_fit_start(self):
         self.teacher_bert = self.teacher_bert.to(self.device)
@@ -53,27 +54,21 @@ class GramDiNoiseSystem(L.LightningModule):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        s_output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        output1 = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         with torch.no_grad():
-            t_output = self.teacher_bert(
+            output2 = self.teacher_bert(
                 input_ids=input_ids, attention_mask=attention_mask
             )
 
-        s_embed = self.get_sentence_embedding(
-            s_output, {"attention_mask": attention_mask}
+        embedding1 = self.get_sentence_embedding(
+            output1, {"attention_mask": attention_mask}
         )
         with torch.no_grad():
-            t_embed = self.get_sentence_embedding(
-                t_output, {"attention_mask": attention_mask}
+            embedding2 = self.get_sentence_embedding(
+                output2, {"attention_mask": attention_mask}
             )
 
-        s_norm = F.normalize(s_embed, p=2, dim=-1)
-        t_norm = F.normalize(t_embed, p=2, dim=-1)
-
-        z_student = torch.matmul(s_norm, s_norm.T)
-        z_teacher = torch.matmul(t_norm, t_norm.T)
-
-        loss = self.gramdi_loss(z_student, z_teacher)
+        loss = self.sigdinoloss(embedding1, embedding2)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -96,17 +91,20 @@ class GramDiNoiseSystem(L.LightningModule):
         return torch.optim.AdamW(self.parameters(), lr=self.cfg.get("lr", 3e-5))
 
     def validation_step(self, batch, batch_idx):
-        metrics = self.evaluator.eval(self)
-        spearman_score = metrics["cosine_spearman"]
-
-        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
-        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
+        pass
 
     def on_validation_start(self):
         self.bert.eval()
 
     def on_validation_end(self):
         self.bert.train()
+
+    def on_validation_epoch_end(self):
+        metrics = self.evaluator.eval(self)
+        spearman_score = metrics["cosine_spearman"]
+
+        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
+        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
 
     @torch.no_grad()
     def encode(

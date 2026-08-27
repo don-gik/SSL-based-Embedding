@@ -22,7 +22,7 @@ from src.dev import setup_device
 from src.system import (
     DinoNoiseSystem,
     EMANoiseSystem,
-    GramDiNoiseSystem,
+    SigDinoNoiseSystem,
     SimCSENoiseSystem,
 )
 
@@ -48,7 +48,7 @@ def main(cfg: DictConfig):
         "SimCSE_Noise": SimCSENoiseSystem,
         "EMA_Noise": EMANoiseSystem,
         "Dino_Noise": DinoNoiseSystem,
-        "GramDi": GramDiNoiseSystem,
+        "SigDino_Noise": SigDinoNoiseSystem,
     }
 
     logger.info("Running test with stuffs below : ")
@@ -62,6 +62,9 @@ def main(cfg: DictConfig):
         system = system_dict[cfg.get("system_name", default_value="SimCSE_Noise")](
             cfg, (accelerate, devices, precision, use_compile)
         )
+
+        logger.info(f"System: {cfg.get("system_name", default_value="SimCSE_Noise")}")
+
         trainer = L.Trainer(
             max_epochs=cfg.epochs,
             accelerator="auto",

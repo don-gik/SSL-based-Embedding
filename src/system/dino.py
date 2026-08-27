@@ -56,7 +56,7 @@ class DinoNoiseSystem(L.LightningModule):
             out_dim=out_dim,
         )
 
-        logger.info("SimCSE Noise System initialized.")
+        logger.info("DINO Noise System initialized.")
 
     def on_fit_start(self):
         self.teacher_bert = self.teacher_bert.to(self.device)
@@ -110,17 +110,20 @@ class DinoNoiseSystem(L.LightningModule):
         return torch.optim.AdamW(self.parameters(), lr=self.cfg.get("lr", 3e-5))
 
     def validation_step(self, batch, batch_idx):
-        metrics = self.evaluator.eval(self)
-        spearman_score = metrics["cosine_spearman"]
-
-        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
-        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
+        pass
 
     def on_validation_start(self):
         self.bert.eval()
 
     def on_validation_end(self):
         self.bert.train()
+
+    def on_validation_epoch_end(self):
+        metrics = self.evaluator.eval(self)
+        spearman_score = metrics["cosine_spearman"]
+
+        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
+        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
 
     @torch.no_grad()
     def encode(
