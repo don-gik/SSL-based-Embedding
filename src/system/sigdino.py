@@ -18,7 +18,7 @@ class SigDinoNoiseSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.99)
+        self.ema_decay = cfg.get("ema_decay", 0.999)
 
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
@@ -104,9 +104,7 @@ class SigDinoNoiseSystem(L.LightningModule):
 
     def on_validation_epoch_end(self):
         metrics = self.evaluator.eval(self)
-        spearman_score = metrics["cosine_spearman"]
-
-        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
+        self.log_dict(metrics, prog_bar=True, on_epoch=True)
 
     @torch.no_grad()
     def encode(
