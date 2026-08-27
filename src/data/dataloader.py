@@ -15,8 +15,6 @@ def get_wikitext_sentence_dataloader(
     cache_dir="./.dataset_cache",
     num_workers=7,
 ):
-    nltk.download("punkt_tab", quiet=True)
-
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
         "Salesforce/wikitext", "wikitext-2-raw-v1", cache_dir=cache_dir

@@ -4,18 +4,18 @@ import logging
 import lightning as L
 import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import change_noise_std, replace_dropout_with_noise
-from src.system.loss import DinoLoss
+from src.system.loss import GramDiLoss
 
 logger = logging.getLogger(__name__)
 
 
-class DinoNoiseSystem(L.LightningModule):
+class GramDiNoiseSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
@@ -29,21 +29,11 @@ class DinoNoiseSystem(L.LightningModule):
         ).train()
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-        hidden_dim = self.bert.config.hidden_size
-        out_dim = cfg.get("out_dim", 65536)
-
-        self.mlp_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, out_dim)
-        )
-
         noise_std = cfg.get("noise_std", 0.05)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
 
         self.teacher_bert = copy.deepcopy(self.bert)
-        self.teacher_mlp_head = copy.deepcopy(self.mlp_head)
-
         self.teacher_bert.requires_grad_(False)
-        self.teacher_mlp_head.requires_grad_(False)
 
         teacher_noise_std = cfg.get("teacher_noise_std", 0.01)
         change_noise_std(self.teacher_bert, new_std=teacher_noise_std)
@@ -52,9 +42,7 @@ class DinoNoiseSystem(L.LightningModule):
         self.evaluator = Evaluator()
         self.model_card_data = None
 
-        self.dino_loss = DinoLoss(
-            out_dim=out_dim,
-        )
+        self.gramdi_loss = GramDiLoss()
 
         logger.info("SimCSE Noise System initialized.")
 
@@ -65,24 +53,27 @@ class DinoNoiseSystem(L.LightningModule):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        output1 = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        s_output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         with torch.no_grad():
-            output2 = self.teacher_bert(
+            t_output = self.teacher_bert(
                 input_ids=input_ids, attention_mask=attention_mask
             )
 
-        embedding1 = self.get_sentence_embedding(
-            output1, {"attention_mask": attention_mask}
+        s_embed = self.get_sentence_embedding(
+            s_output, {"attention_mask": attention_mask}
         )
         with torch.no_grad():
-            embedding2 = self.get_sentence_embedding(
-                output2, {"attention_mask": attention_mask}
+            t_embed = self.get_sentence_embedding(
+                t_output, {"attention_mask": attention_mask}
             )
 
-        z1 = self.mlp_head(embedding1)
-        z2 = self.teacher_mlp_head(embedding2)
+        s_norm = F.normalize(s_embed, p=2, dim=-1)
+        t_norm = F.normalize(t_embed, p=2, dim=-1)
 
-        loss = self.dino_loss(z1, z2)
+        z_student = torch.matmul(s_norm, s_norm.T)
+        z_teacher = torch.matmul(t_norm, t_norm.T)
+
+        loss = self.gramdi_loss(z_student, z_teacher)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -91,11 +82,6 @@ class DinoNoiseSystem(L.LightningModule):
         with torch.no_grad():
             # backbone
             for s, t in zip(self.bert.parameters(), self.teacher_bert.parameters()):
-                t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
-            # mlp
-            for s, t in zip(
-                self.mlp_head.parameters(), self.teacher_mlp_head.parameters()
-            ):
                 t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
     def get_sentence_embedding(self, outputs, batch):

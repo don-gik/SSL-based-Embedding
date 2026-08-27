@@ -8,6 +8,7 @@ else:
     ssl._create_default_https_context = _create_unverified_context
 
 import logging
+import os
 
 import hydra
 import lightning as L
@@ -18,14 +19,26 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
-from src.system import DinoNoiseSystem, EMANoiseSystem, SimCSENoiseSystem
+from src.system import (
+    DinoNoiseSystem,
+    EMANoiseSystem,
+    GramDiNoiseSystem,
+    SimCSENoiseSystem,
+)
 
 logger = logging.getLogger(__name__)
+
+nltk_data_dir = os.path.expanduser("~/nltk_data")
+if nltk_data_dir not in nltk.data.path:
+    nltk.data.path.append(nltk_data_dir)
 
 try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
-    nltk.download("punkt", quiet=True)
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+    except LookupError:
+        logger.warning(f"NLTK punkt dataset not found in {nltk_data_dir}")
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
@@ -35,6 +48,7 @@ def main(cfg: DictConfig):
         "SimCSE_Noise": SimCSENoiseSystem,
         "EMA_Noise": EMANoiseSystem,
         "Dino_Noise": DinoNoiseSystem,
+        "GramDi": GramDiNoiseSystem,
     }
 
     logger.info("Running test with stuffs below : ")
