@@ -1,3 +1,4 @@
+import copy
 import logging
 
 import lightning as L
@@ -7,16 +8,17 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
-from src.system.layer import replace_dropout_with_noise
+from src.system.layer import change_noise_std, replace_dropout_with_noise
 from src.system.loss import simcse_loss
 
 logger = logging.getLogger(__name__)
 
 
-class SimCSENoiseSystem(L.LightningModule):
+class EMANoiseSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
+        self.ema_decay = cfg.get("ema_decay", 0.99)
 
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
@@ -29,35 +31,56 @@ class SimCSENoiseSystem(L.LightningModule):
         noise_std = cfg.get("noise_std", 0.05)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
 
+        self.teacher_bert = copy.deepcopy(self.bert)
+        self.teacher_bert.requires_grad_(False)
+        teacher_noise_std = cfg.get("teacher_noise_std", 0.01)
+        change_noise_std(self.teacher_bert, new_std=teacher_noise_std)
+        self.teacher_bert.train()
+
         self.evaluator = Evaluator()
         self.model_card_data = None
 
         logger.info("SimCSE Noise System initialized.")
 
+    def on_fit_start(self):
+        self.teacher_bert = self.teacher_bert.to(self.device)
+
     def training_step(self, batch, batch_idx):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        combined_input_ids = torch.cat([input_ids, input_ids], dim=0)
-        combined_attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
+        output1 = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        with torch.no_grad():
+            output2 = self.teacher_bert(
+                input_ids=input_ids, attention_mask=attention_mask
+            )
 
-        outputs = self.bert(
-            input_ids=combined_input_ids, attention_mask=combined_attention_mask
+        embedding1 = self.get_sentence_embedding(
+            output1, {"attention_mask": attention_mask}
         )
+        with torch.no_grad():
+            embedding2 = self.get_sentence_embedding(
+                output2, {"attention_mask": attention_mask}
+            )
 
-        combined_embeddings = self.get_sentence_embedding(
-            outputs, {"attention_mask": combined_attention_mask}
-        )
-
-        batch_size = input_ids.size(0)
-        z1 = combined_embeddings[:batch_size]
-        z2 = combined_embeddings[batch_size:]
+        z1 = embedding1
+        z2 = embedding2
 
         temp = self.cfg.get("temperature", 0.1)
         loss = simcse_loss(z1, z2, temperature=temp)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        with torch.no_grad():
+            for student_param, teacher_param in zip(
+                self.bert.parameters(), self.teacher_bert.parameters()
+            ):
+                # EMA
+                teacher_param.data.mul_(self.ema_decay).add_(
+                    student_param.data, alpha=1.0 - self.ema_decay
+                )
 
     def get_sentence_embedding(self, outputs, batch):
         embeddings = outputs.last_hidden_state

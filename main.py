@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
-from src.system import SimCSENoiseSystem
+from src.system import DinoNoiseSystem, EMANoiseSystem, SimCSENoiseSystem
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,11 @@ except LookupError:
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig):
     (accelerate, devices, precision, use_compile) = setup_device()
+    system_dict: dict[str, L.LightningModule] = {
+        "SimCSE_Noise": SimCSENoiseSystem,
+        "EMA_Noise": EMANoiseSystem,
+        "Dino_Noise": DinoNoiseSystem,
+    }
 
     logger.info("Running test with stuffs below : ")
     logger.info(f"{accelerate}, {devices}, {precision}, {use_compile}")
@@ -40,7 +45,9 @@ def main(cfg: DictConfig):
         dummy_loader = DataLoader(dummy_ds, batch_size=1)
 
         dataloader = get_wikitext_sentence_dataloader()
-        system = SimCSENoiseSystem(cfg, (accelerate, devices, precision, use_compile))
+        system = system_dict[cfg.get("system_name", default_value="SimCSE_Noise")](
+            cfg, (accelerate, devices, precision, use_compile)
+        )
         trainer = L.Trainer(
             max_epochs=cfg.epochs,
             accelerator="auto",
