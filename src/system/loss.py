@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 
-def simcse_loss(z1: Tensor, z2: Tensor, temperature: float = 0.05):
+def simcse_loss(z1: Tensor, z2: Tensor, temperature: float = 0.1):
     """SimCSE Loss.
 
     Args:

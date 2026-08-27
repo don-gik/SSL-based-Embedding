@@ -1,10 +1,12 @@
 import logging
 
 import lightning as L
+import numpy as np
 import torch
 from omegaconf import DictConfig
-from transformers import BertModel
+from transformers import AutoTokenizer, BertModel
 
+from src.system.eval import Evaluator
 from src.system.layer import replace_dropout_with_noise
 from src.system.loss import simcse_loss
 
@@ -21,10 +23,13 @@ class SimCSENoiseSystem(L.LightningModule):
 
         self.bert = BertModel.from_pretrained(
             "bert-base-uncased", attn_implementation=attn_mode
-        )
+        ).train()
+        self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-        noise_std = cfg.get("noise_std", 0.01)
+        noise_std = cfg.get("noise_std", 0.05)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
+
+        self.evaluator = Evaluator()
 
         logger.info("SimCSE Noise System initialized.")
 
@@ -66,3 +71,47 @@ class SimCSENoiseSystem(L.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.cfg.get("lr", 3e-5))
+
+    def validation_step(self, batch, batch_idx):
+        pass
+
+    def on_validation_model_eval(self):
+        metrics = self.evaluator.eval(self)
+        spearman_score = metrics["cosine_spearman"]
+
+        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
+        logger.info(f"Epoch {self.current_epoch} STSb Spearman: {spearman_score:.4f}")
+
+        self.bert.train()
+
+    def on_validation_start(self):
+        self.bert.eval()
+
+    def on_validation_end(self):
+        self.bert.train()
+
+    @torch.no_grad()
+    def encode(
+        self,
+        sentences: list[str],
+        batch_size: int = 64,
+        show_progress_bar: bool = False,
+        **kwargs,
+    ) -> np.ndarray:
+        self.eval()
+        all_embeddings = []
+
+        for i in range(0, len(sentences), batch_size):
+            batch_text = sentences[i : i + batch_size]
+
+            inputs = self.tokenizer(
+                batch_text, padding=True, truncation=True, return_tensors="pt"
+            )
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            outputs = self.bert(**inputs)
+            embeddings = self.get_sentence_embedding(outputs, inputs)
+
+            all_embeddings.append(embeddings.cpu().numpy())
+
+        return np.vstack(all_embeddings)

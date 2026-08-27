@@ -36,7 +36,12 @@ def main(cfg: DictConfig):
     try:
         dataloader = get_wikitext_sentence_dataloader()
         system = SimCSENoiseSystem(cfg, (accelerate, devices, precision, use_compile))
-        trainer = L.Trainer(max_epochs=cfg.epochs, accelerator="auto")
+        trainer = L.Trainer(
+            max_epochs=cfg.epochs,
+            accelerator="auto",
+            val_check_interval=10,
+            check_val_every_n_epoch=None,
+        )
         trainer.fit(model=system, train_dataloaders=dataloader)
 
         logger.info("Epoch Finished.")

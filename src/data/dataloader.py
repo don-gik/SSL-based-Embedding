@@ -10,9 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_wikitext_sentence_dataloader(
-    model_name="bert-base-uncased", batch_size=32, cache_dir="./.dataset_cache"
+    model_name="bert-base-uncased",
+    batch_size=32,
+    cache_dir="./.dataset_cache",
+    num_workers=7,
 ):
-    # nltk.download("punkt_tab", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
 
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
@@ -58,6 +61,7 @@ def get_wikitext_sentence_dataloader(
         shuffle=True,
         collate_fn=data_collator,
         pin_memory=True,  # GPU Server Opt
+        num_workers=num_workers,
     )
 
     return train_loader
