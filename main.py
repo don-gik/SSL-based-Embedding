@@ -14,6 +14,7 @@ import hydra
 import lightning as L
 import nltk
 import torch
+from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -58,6 +59,9 @@ def main(cfg: DictConfig):
         dummy_ds = TensorDataset(torch.zeros(1))
         dummy_loader = DataLoader(dummy_ds, batch_size=1)
 
+        tensorboardlogger = TensorBoardLogger(
+            "tb_logs", name=cfg.get("system_name", default_value="SimCSE_Noise")
+        )
         dataloader = get_wikitext_sentence_dataloader()
         system = system_dict[cfg.get("system_name", default_value="SimCSE_Noise")](
             cfg, (accelerate, devices, precision, use_compile)
@@ -66,6 +70,7 @@ def main(cfg: DictConfig):
         logger.info(f"System: {cfg.get("system_name", default_value="SimCSE_Noise")}")
 
         trainer = L.Trainer(
+            logger=tensorboardlogger,
             max_epochs=cfg.epochs,
             accelerator="auto",
             val_check_interval=100,

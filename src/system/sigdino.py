@@ -68,7 +68,7 @@ class SigDinoNoiseSystem(L.LightningModule):
                 output2, {"attention_mask": attention_mask}
             )
 
-        loss = self.sigdinoloss(embedding1, embedding2)
+        loss = self.sigdinoloss(embedding1, embedding2, self.global_step)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -104,7 +104,6 @@ class SigDinoNoiseSystem(L.LightningModule):
         spearman_score = metrics["cosine_spearman"]
 
         self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
-        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
 
     @torch.no_grad()
     def encode(

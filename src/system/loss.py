@@ -74,20 +74,22 @@ class SigmoidDinoLoss(nn.Module):
         self,
         out_dim: int,
         center_momentum: float = 0.9,
-        student_temp: float = 0.3,
-        teacher_temp: float = 0.15,
+        student_temp: float = 0.2,
+        teacher_temp: float = 0.05,
+        warmup_steps: int = 500,
     ):
         super().__init__()
         self.student_temp = student_temp
         self.teacher_temp = teacher_temp
         self.center_momentum = center_momentum
+        self.warmup_steps = warmup_steps
 
         self.register_buffer("center", torch.zeros((1, out_dim)))
 
-    def forward(self, z_student, z_teacher):
+    def forward(self, z_student, z_teacher, global_step):
         # Center Update
         with torch.no_grad():
-            self.update_center(z_teacher)
+            self.update_center(z_teacher, global_step)
 
         # Teacher Centering & Sharpening
         z_teacher_centered = z_teacher - self.center
@@ -100,8 +102,9 @@ class SigmoidDinoLoss(nn.Module):
         return loss
 
     @torch.no_grad()
-    def update_center(self, z_teacher):
+    def update_center(self, z_teacher, global_step):
         batch_center = z_teacher.mean(dim=0, keepdim=True)
-        self.center = self.center * self.center_momentum + batch_center * (
-            1 - self.center_momentum
-        )
+        if global_step < self.warmup_steps:
+            self.center = batch_center
+        else:
+            self.center = self.center * 0.9 + batch_center * 0.1
