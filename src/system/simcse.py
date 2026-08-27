@@ -26,17 +26,15 @@ class SimCSENoiseSystem(L.LightningModule):
         ).train()
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-        noise_std = cfg.get("noise_std", 0.05)
+        noise_std = cfg.get("noise_std", 0.1)
         replace_dropout_with_noise(self.bert, noise_std=noise_std)
 
         self.evaluator = Evaluator()
+        self.model_card_data = None
 
         logger.info("SimCSE Noise System initialized.")
 
     def training_step(self, batch, batch_idx):
-        if batch_idx % 1 == 0:
-            logger.debug(f"Batch Index: {batch_idx}")
-
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
@@ -55,7 +53,7 @@ class SimCSENoiseSystem(L.LightningModule):
         z1 = combined_embeddings[:batch_size]
         z2 = combined_embeddings[batch_size:]
 
-        temp = self.cfg.get("temperature", 0.05)
+        temp = self.cfg.get("temperature", 0.1)
         loss = simcse_loss(z1, z2, temperature=temp)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
@@ -73,16 +71,11 @@ class SimCSENoiseSystem(L.LightningModule):
         return torch.optim.AdamW(self.parameters(), lr=self.cfg.get("lr", 3e-5))
 
     def validation_step(self, batch, batch_idx):
-        pass
-
-    def on_validation_model_eval(self):
         metrics = self.evaluator.eval(self)
         spearman_score = metrics["cosine_spearman"]
 
         self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
-        logger.info(f"Epoch {self.current_epoch} STSb Spearman: {spearman_score:.4f}")
-
-        self.bert.train()
+        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
 
     def on_validation_start(self):
         self.bert.eval()

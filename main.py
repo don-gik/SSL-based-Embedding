@@ -44,11 +44,14 @@ def main(cfg: DictConfig):
         trainer = L.Trainer(
             max_epochs=cfg.epochs,
             accelerator="auto",
-            val_check_interval=10,
+            val_check_interval=100,
             check_val_every_n_epoch=None,
+        )
+        trainer.fit(
+            model=system,
+            train_dataloaders=dataloader,
             val_dataloaders=dummy_loader,
         )
-        trainer.fit(model=system, train_dataloaders=dataloader)
 
         logger.info("Epoch Finished.")
 
