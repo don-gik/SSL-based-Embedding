@@ -12,7 +12,9 @@ import logging
 import hydra
 import lightning as L
 import nltk
+import torch
 from omegaconf import DictConfig
+from torch.utils.data import DataLoader, TensorDataset
 
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
@@ -34,6 +36,9 @@ def main(cfg: DictConfig):
     logger.info(f"{accelerate}, {devices}, {precision}, {use_compile}")
 
     try:
+        dummy_ds = TensorDataset(torch.zeros(1))
+        dummy_loader = DataLoader(dummy_ds, batch_size=1)
+
         dataloader = get_wikitext_sentence_dataloader()
         system = SimCSENoiseSystem(cfg, (accelerate, devices, precision, use_compile))
         trainer = L.Trainer(
@@ -41,6 +46,7 @@ def main(cfg: DictConfig):
             accelerator="auto",
             val_check_interval=10,
             check_val_every_n_epoch=None,
+            val_dataloaders=dummy_loader,
         )
         trainer.fit(model=system, train_dataloaders=dataloader)
 
