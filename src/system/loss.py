@@ -75,7 +75,7 @@ class SigmoidDinoLoss(nn.Module):
         out_dim: int,
         center_momentum: float = 0.9,
         student_temp: float = 0.2,
-        teacher_temp: float = 0.05,
+        teacher_temp: float = 0.1,
         warmup_steps: int = 500,
     ):
         super().__init__()
@@ -87,16 +87,20 @@ class SigmoidDinoLoss(nn.Module):
         self.register_buffer("center", torch.zeros((1, out_dim)))
 
     def forward(self, z_student, z_teacher, global_step):
+        # Norm
+        z_student_norm = F.normalize(z_student, p=2, dim=-1)
+        z_teacher_norm = F.normalize(z_teacher, p=2, dim=-1)
+
         # Center Update
         with torch.no_grad():
-            self.update_center(z_teacher, global_step)
+            self.update_center(z_teacher_norm, global_step)
 
         # Teacher Centering & Sharpening
-        z_teacher_centered = z_teacher - self.center
+        z_teacher_centered = z_teacher_norm - self.center
         p_teacher = F.sigmoid(z_teacher_centered / self.teacher_temp)
 
         # Student Sharpening & Cross-Entropy
-        p_student = F.sigmoid(z_student / self.student_temp)
+        p_student = F.sigmoid(z_student_norm / self.student_temp)
 
         loss = F.binary_cross_entropy(p_student, p_teacher.detach())
         return loss
