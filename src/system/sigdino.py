@@ -59,10 +59,16 @@ class SigDinoNoiseSystem(L.LightningModule):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        output1 = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        output1 = self.bert(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
         with torch.no_grad():
             output2 = self.teacher_bert(
-                input_ids=input_ids, attention_mask=attention_mask
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
             )
 
         embedding1 = self.get_sentence_embedding(
@@ -91,7 +97,7 @@ class SigDinoNoiseSystem(L.LightningModule):
                 t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
     def get_sentence_embedding(self, outputs, batch):
-        embeddings = outputs.last_hidden_state
+        embeddings = outputs.hidden_states[-2]
         attention_mask = batch["attention_mask"]
         input_mask_expanded = attention_mask.unsqueeze(-1).expand_as(embeddings).float()
         sum_embeddings = torch.sum(embeddings * input_mask_expanded, dim=1)
