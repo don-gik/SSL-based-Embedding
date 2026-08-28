@@ -18,7 +18,7 @@ class SigDinoNoiseSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.999)
+        self.ema_decay = cfg.get("ema_decay", 0.995)
 
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
@@ -48,7 +48,7 @@ class SigDinoNoiseSystem(L.LightningModule):
         self.varianceloss = VarianceLoss()
 
         self.cov_weight = 1.0
-        self.var_weight = 0.3
+        self.var_weight = 0.5
 
         logger.info("Sigmoid Dino Noise System initialized.")
 

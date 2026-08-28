@@ -136,6 +136,6 @@ class VarianceLoss(nn.Module):
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         std_z = torch.sqrt(z.var(dim=0) + 1e-04)
-        var_loss = torch.mean(F.relu(1.0 - std_z))
+        var_loss = torch.mean(F.relu(0.2 - std_z))
 
         return var_loss
