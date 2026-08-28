@@ -140,7 +140,7 @@ class CovarianceLoss(nn.Module):
         off_diag_cov = cov_matrix.pow(2)
         off_diag_cov.fill_diagonal_(0)
 
-        cov_loss = off_diag_cov.sum() / num_features
+        cov_loss = off_diag_cov.sum() / (num_features * (num_features - 1))
         return cov_loss
 
 

@@ -47,8 +47,8 @@ class SigDinoNoiseSystem(L.LightningModule):
         self.covarianceloss = CovarianceLoss()
         self.varianceloss = VarianceLoss()
 
-        self.cov_weight = 1.0
-        self.var_weight = 0.5
+        self.cov_weight = 0.5
+        self.var_weight = 3.0
 
         logger.info("Sigmoid Dino Noise System initialized.")
 
@@ -97,7 +97,7 @@ class SigDinoNoiseSystem(L.LightningModule):
                 t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
     def get_sentence_embedding(self, outputs, batch):
-        embeddings = outputs.hidden_states[-2]
+        embeddings = outputs.last_hidden_state
         attention_mask = batch["attention_mask"]
         input_mask_expanded = attention_mask.unsqueeze(-1).expand_as(embeddings).float()
         sum_embeddings = torch.sum(embeddings * input_mask_expanded, dim=1)

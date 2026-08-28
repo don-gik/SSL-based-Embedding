@@ -17,7 +17,7 @@ def get_wikitext_sentence_dataloader(
 ):
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
-        "Salesforce/wikitext", "wikitext-2-raw-v1", cache_dir=cache_dir
+        "Salesforce/wikitext", "wikitext-103-raw-v1", cache_dir=cache_dir
     )
 
     def chunk_to_sentences(batch):
@@ -41,9 +41,9 @@ def get_wikitext_sentence_dataloader(
         batched=True,
         remove_columns=["text"],
         cache_file_names={
-            "train": os.path.join(cache_dir, "train_sent.cache"),
-            "validation": os.path.join(cache_dir, "val_sent.cache"),
-            "test": os.path.join(cache_dir, "test_sent.cache"),
+            "train": os.path.join(cache_dir, "train_103_sent.cache"),
+            "validation": os.path.join(cache_dir, "val_103_sent.cache"),
+            "test": os.path.join(cache_dir, "test_103_sent.cache"),
         },
     )
 

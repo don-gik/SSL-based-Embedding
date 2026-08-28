@@ -73,7 +73,7 @@ def main(cfg: DictConfig):
             logger=tensorboardlogger,
             max_epochs=cfg.epochs,
             accelerator="auto",
-            val_check_interval=100,
+            val_check_interval=250,
             check_val_every_n_epoch=None,
         )
         trainer.fit(
