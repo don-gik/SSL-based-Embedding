@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import change_noise_std, replace_dropout_with_noise
-from src.system.loss import CovarianceLoss, SigmoidDinoLoss
+from src.system.loss import CovarianceLoss, SigmoidDinoLoss, VarianceLoss
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,10 @@ class SigDinoNoiseSystem(L.LightningModule):
 
         self.sigdinoloss = SigmoidDinoLoss(out_dim=out_dim)
         self.covarianceloss = CovarianceLoss()
+        self.varianceloss = VarianceLoss()
+
+        self.cov_weight = 1.0
+        self.var_weight = 0.3
 
         logger.info("Sigmoid Dino Noise System initialized.")
 
@@ -69,11 +73,15 @@ class SigDinoNoiseSystem(L.LightningModule):
                 output2, {"attention_mask": attention_mask}
             )
 
-        loss = self.sigdinoloss(
-            embedding1, embedding2, self.global_step
-        ) + self.covarianceloss(embedding1)
+        dino_loss = self.sigdinoloss(embedding1, embedding2, self.global_step)
+        cov_loss = self.covarianceloss(embedding1) * self.cov_weight
+        var_loss = self.varianceloss(embedding1) * self.var_weight
+        loss = dino_loss + cov_loss + var_loss
 
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("dino_loss", dino_loss)
+        self.log("cov_loss", cov_loss)
+        self.log("var_loss", var_loss)
+        self.log("train_loss", loss, prog_bar=True, on_step=True)
         return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx):

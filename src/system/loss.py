@@ -128,3 +128,14 @@ class CovarianceLoss(nn.Module):
 
         cov_loss = off_diag_cov.sum() / num_features
         return cov_loss
+
+
+class VarianceLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        std_z = torch.sqrt(z.var(dim=0) + 1e-04)
+        var_loss = torch.mean(F.relu(1.0 - std_z))
+
+        return var_loss
