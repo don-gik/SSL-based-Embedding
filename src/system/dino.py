@@ -10,7 +10,7 @@ from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import change_noise_std, replace_dropout_with_noise
-from src.system.loss import DinoLoss
+from src.system.loss import CovarianceLoss, DinoLoss, VarianceLoss
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +30,13 @@ class DinoNoiseSystem(L.LightningModule):
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
         hidden_dim = self.bert.config.hidden_size
-        out_dim = cfg.get("out_dim", 65536)
+        vocab_size = self.bert.config.vocab_size
+
+        self.final_linear = nn.Linear(hidden_dim, vocab_size, bias=False)
+        self.final_linear.weight = self.bert.embeddings.word_embeddings.weight
 
         self.mlp_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim), nn.GELU(), nn.Linear(hidden_dim, out_dim)
+            nn.Linear(hidden_dim, hidden_dim), nn.GELU(), self.final_linear
         )
 
         noise_std = cfg.get("noise_std", 0.05)
@@ -41,6 +44,10 @@ class DinoNoiseSystem(L.LightningModule):
 
         self.teacher_bert = copy.deepcopy(self.bert)
         self.teacher_mlp_head = copy.deepcopy(self.mlp_head)
+
+        self.teacher_mlp_head[2].weight = (
+            self.teacher_bert.embeddings.word_embeddings.weight
+        )
 
         self.teacher_bert.requires_grad_(False)
         self.teacher_mlp_head.requires_grad_(False)
@@ -53,8 +60,13 @@ class DinoNoiseSystem(L.LightningModule):
         self.model_card_data = None
 
         self.dino_loss = DinoLoss(
-            out_dim=out_dim,
+            out_dim=vocab_size,
         )
+        self.covarianceloss = CovarianceLoss()
+        self.varianceloss = VarianceLoss()
+
+        self.cov_weight = 1.0
+        self.var_weight = 1.0
 
         logger.info("DINO Noise System initialized.")
 
@@ -82,7 +94,15 @@ class DinoNoiseSystem(L.LightningModule):
         z1 = self.mlp_head(embedding1)
         z2 = self.teacher_mlp_head(embedding2)
 
-        loss = self.dino_loss(z1, z2)
+        dino_loss = self.dino_loss(z1, z2)
+        cov_loss = self.covarianceloss(z1)
+        var_loss = self.varianceloss(z1)
+
+        loss = dino_loss + cov_loss + var_loss
+
+        self.log("dino_loss", dino_loss)
+        self.log("cov_loss", cov_loss)
+        self.log("var_loss", var_loss)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -120,10 +140,7 @@ class DinoNoiseSystem(L.LightningModule):
 
     def on_validation_epoch_end(self):
         metrics = self.evaluator.eval(self)
-        spearman_score = metrics["cosine_spearman"]
-
-        self.log("val_stsb_spearman", spearman_score, prog_bar=True, on_epoch=True)
-        logger.info(f"Step {self.global_step} STSb Spearman: {spearman_score:.4f}")
+        self.log_dict(metrics, prog_bar=True, on_epoch=True)
 
     @torch.no_grad()
     def encode(
