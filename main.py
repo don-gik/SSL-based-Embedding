@@ -36,6 +36,8 @@ except LookupError:
     except LookupError:
         logger.warning(f"NLTK punkt dataset not found in {nltk_data_dir}")
 
+torch.set_float32_matmul_precision("high")
+
 
 @hydra.main(version_base=None, config_path="configs", config_name="config")
 def main(cfg: DictConfig):

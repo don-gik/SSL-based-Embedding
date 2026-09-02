@@ -9,7 +9,7 @@ from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
 from src.system.layer import BertAttentionHead
-from src.system.loss import CovarianceLoss, DinoLoss, VarianceLoss
+from src.system.loss import DinoLoss
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +36,7 @@ class OtherSystem(L.LightningModule):
             self.bert.config, projection_dim=hidden_dim, orth=True
         ).eval()
 
-        self.cov_weight = 0.01
-        self.var_weight = 1.0
-
-        self.dino_loss, self.cov_loss, self.var_loss = self.setup_loss(vocab_size)
+        self.dino_loss = self.setup_loss(vocab_size)
 
         self.evaluator = Evaluator()
 
@@ -67,26 +64,25 @@ class OtherSystem(L.LightningModule):
                 t_output, {"attention_mask": comb_attention_mask}
             )
 
-        word_embeddings_weight = self.bert.embeddings.word_embeddings.weight
-
-        s_logit = F.linear(s_embed, word_embeddings_weight)
+        s_embed_norm = F.normalize(s_embed, p=2, dim=-1)
         with torch.no_grad():
-            t_logit = F.linear(t_embed, word_embeddings_weight)
+            t_embed_norm = F.normalize(t_embed, p=2, dim=-1)
+
+        vocab_weight_norm = F.normalize(
+            self.bert.embeddings.word_embeddings.weight, p=2, dim=-1
+        )
+
+        s_logit = F.linear(s_embed_norm, vocab_weight_norm)
+        with torch.no_grad():
+            t_logit = F.linear(t_embed_norm, vocab_weight_norm)
 
         s_z1, s_z2 = torch.chunk(s_logit, 2, dim=0)
         with torch.no_grad():
             t_z1, t_z2 = torch.chunk(t_logit, 2, dim=0)
 
-        dino_loss = (self.dino_loss(s_z1, t_z2) + self.dino_loss(s_z2, t_z1)) * 0.5
+        loss = (self.dino_loss(s_z1, t_z2) + self.dino_loss(s_z2, t_z1)) * 0.5
         self.dino_loss.update_center(t_logit)
-        cov_loss = (self.cov_loss(s_z1) + self.cov_loss(s_z2)) * 0.5 * self.cov_weight
-        var_loss = (self.var_loss(s_z1) + self.var_loss(s_z2)) * 0.5 * self.var_weight
 
-        loss = dino_loss + cov_loss + var_loss
-
-        self.log("dino_loss", dino_loss)
-        self.log("cov_loss", cov_loss)
-        self.log("var_loss", var_loss)
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
@@ -108,10 +104,8 @@ class OtherSystem(L.LightningModule):
 
         return (bert, tokenizer)
 
-    def setup_loss(
-        self, vocab_size: int
-    ) -> tuple[DinoLoss, CovarianceLoss, VarianceLoss]:
-        return DinoLoss(vocab_size), CovarianceLoss(), VarianceLoss()
+    def setup_loss(self, vocab_size: int) -> DinoLoss:
+        return DinoLoss(vocab_size)
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         with torch.no_grad():
