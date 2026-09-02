@@ -37,13 +37,15 @@ class DinoLoss(nn.Module):
         self,
         out_dim: int,
         center_momentum: float = 0.9,
-        student_temp: float = 0.1,
-        teacher_temp: float = 0.04,
+        student_temp: float = 0.2,
+        teacher_temp: float = 0.1,
+        warmup_steps: int = 1000,
     ):
         super().__init__()
         self.student_temp = student_temp
         self.teacher_temp = teacher_temp
         self.center_momentum = center_momentum
+        self.warmup_steps = warmup_steps
 
         self.register_buffer("center", torch.zeros(1, out_dim))
 
@@ -64,11 +66,17 @@ class DinoLoss(nn.Module):
 
         return loss
 
-    def update_center(self, teacher_output):
-        batch_center = torch.mean(teacher_output, dim=0, keepdim=True)
-        self.center = self.center * self.center_momentum + batch_center * (
-            1 - self.center_momentum
-        )
+    @torch.no_grad()
+    def update_center(self, z_teacher, global_step):
+        batch_center = z_teacher.mean(dim=0, keepdim=True)
+        if global_step < self.warmup_steps:
+            self.center = self.center * self.warmup_center_momentum + batch_center * (
+                1 - self.warmup_center_momentum
+            )
+        else:
+            self.center = self.center * self.center_momentum + batch_center * (
+                1 - self.center_momentum
+            )
 
 
 class SigmoidDinoLoss(nn.Module):
