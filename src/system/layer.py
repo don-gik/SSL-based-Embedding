@@ -13,6 +13,7 @@ class BertAttentionHead(nn.Module):
 
         self.mlp = nn.Sequential(
             nn.Linear(config.hidden_size, config.hidden_size * 2),
+            nn.LayerNorm(config.hidden_size * 2),
             nn.GELU(),
             nn.Dropout(config.hidden_dropout_prob),
             nn.Linear(config.hidden_size * 2, out_dim),

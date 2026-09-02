@@ -36,6 +36,10 @@ class OtherSystem(L.LightningModule):
             self.bert.config, projection_dim=hidden_dim, orth=True
         ).eval()
 
+        # self.num_prototypes = 8192
+        # self.s_proto = torch.nn.Linear(hidden_dim, self.num_prototypes, bias=False)
+        # self.t_proto = torch.nn.Linear(hidden_dim, self.num_prototypes, bias=False).eval()
+
         self.dino_loss = self.setup_loss(vocab_size)
 
         self.evaluator = Evaluator()
