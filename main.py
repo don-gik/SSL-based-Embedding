@@ -20,13 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
-from src.system import (
-    DinoDropoutSystem,
-    DinoNoiseSystem,
-    EMANoiseSystem,
-    SigDinoNoiseSystem,
-    SimCSENoiseSystem,
-)
+from src.system import TheSystem
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +41,7 @@ except LookupError:
 def main(cfg: DictConfig):
     (accelerate, devices, precision, use_compile) = setup_device()
     system_dict: dict[str, L.LightningModule] = {
-        "SimCSE_Noise": SimCSENoiseSystem,
-        "EMA_Noise": EMANoiseSystem,
-        "Dino_Noise": DinoNoiseSystem,
-        "SigDino_Noise": SigDinoNoiseSystem,
-        "Dino_Dropout": DinoDropoutSystem,
+        "the system": TheSystem,
     }
 
     logger.info("Running test with stuffs below : ")
