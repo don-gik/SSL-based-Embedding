@@ -13,6 +13,7 @@ dependencies = [
     "lightning[extra]>=2.6.5",
     "nltk>=3.10.3",
     "omegaconf>=2.3.1",
+    "peft>=0.20.0",
     "sentence-transformers>=6.0.0",
     "tensorboard>=2.21.0",
     "torch>=2.6.0",
