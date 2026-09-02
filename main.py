@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
 from src.system import (
+    DinoDropoutSystem,
     DinoNoiseSystem,
     EMANoiseSystem,
     SigDinoNoiseSystem,
@@ -50,6 +51,7 @@ def main(cfg: DictConfig):
         "EMA_Noise": EMANoiseSystem,
         "Dino_Noise": DinoNoiseSystem,
         "SigDino_Noise": SigDinoNoiseSystem,
+        "Dino_Dropout": DinoDropoutSystem,
     }
 
     logger.info("Running test with stuffs below : ")

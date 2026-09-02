@@ -1,4 +1,5 @@
 from src.system.dino import DinoNoiseSystem
+from src.system.dinodropout import DinoDropoutSystem
 from src.system.ema import EMANoiseSystem
 from src.system.layer import GaussianNoiseInjection, replace_dropout_with_noise
 from src.system.loss import simcse_loss
@@ -13,4 +14,5 @@ __all__ = [
     "DinoNoiseSystem",
     "EMANoiseSystem",
     "SigDinoNoiseSystem",
+    "DinoDropoutSystem",
 ]

@@ -9,13 +9,13 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
-from src.system.layer import change_noise_std, replace_dropout_with_noise
+from src.system.layer import change_noise_std
 from src.system.loss import CovarianceLoss, DinoLoss, VarianceLoss
 
 logger = logging.getLogger(__name__)
 
 
-class DinoNoiseSystem(L.LightningModule):
+class DinoDropoutSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
@@ -25,7 +25,10 @@ class DinoNoiseSystem(L.LightningModule):
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
 
         self.bert = BertModel.from_pretrained(
-            "bert-base-uncased", attn_implementation=attn_mode
+            "bert-base-uncased",
+            attn_implementation=attn_mode,
+            hidden_dropout_prob=0.2,
+            attention_probs_dropout_prob=0.2,
         ).train()
         self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
@@ -39,9 +42,6 @@ class DinoNoiseSystem(L.LightningModule):
             nn.Linear(hidden_dim, hidden_dim), nn.GELU(), final_linear
         )
 
-        noise_std = cfg.get("noise_std", 0.05)
-        replace_dropout_with_noise(self.bert, noise_std=noise_std)
-
         self.teacher_bert = copy.deepcopy(self.bert)
         self.teacher_mlp_head = copy.deepcopy(self.mlp_head)
 
@@ -51,6 +51,9 @@ class DinoNoiseSystem(L.LightningModule):
 
         self.teacher_bert.requires_grad_(False)
         self.teacher_mlp_head.requires_grad_(False)
+
+        self.teacher_bert.eval()
+        self.teacher_mlp_head.eval()
 
         teacher_noise_std = cfg.get("teacher_noise_std", 0.01)
         change_noise_std(self.teacher_bert, new_std=teacher_noise_std)
@@ -65,8 +68,8 @@ class DinoNoiseSystem(L.LightningModule):
         self.covarianceloss = CovarianceLoss()
         self.varianceloss = VarianceLoss()
 
-        self.cov_weight = 1.0
-        self.var_weight = 1.0
+        self.cov_weight = 3.0
+        self.var_weight = 3.0
 
         logger.info("DINO Noise System initialized.")
 
