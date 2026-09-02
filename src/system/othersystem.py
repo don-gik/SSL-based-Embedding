@@ -3,6 +3,7 @@ import logging
 import lightning as L
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
@@ -36,9 +37,12 @@ class OtherSystem(L.LightningModule):
             self.bert.config, projection_dim=hidden_dim, orth=True
         ).eval()
 
-        # self.num_prototypes = 8192
-        # self.s_proto = torch.nn.Linear(hidden_dim, self.num_prototypes, bias=False)
-        # self.t_proto = torch.nn.Linear(hidden_dim, self.num_prototypes, bias=False).eval()
+        self.predictor = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
 
         self.dino_loss = self.setup_loss(vocab_size)
 
@@ -68,24 +72,18 @@ class OtherSystem(L.LightningModule):
                 t_output, {"attention_mask": comb_attention_mask}
             )
 
-        s_embed_norm = F.normalize(s_embed, p=2, dim=-1)
+        p_embed = self.predictor(s_embed)
+
+        p_z1, p_z2 = torch.chunk(p_embed, 2, dim=0)
         with torch.no_grad():
-            t_embed_norm = F.normalize(t_embed, p=2, dim=-1)
+            t_z1, t_z2 = torch.chunk(t_embed, 2, dim=0)
 
-        vocab_weight_norm = F.normalize(
-            self.bert.embeddings.word_embeddings.weight, p=2, dim=-1
-        )
+        def cosine_loss(p, z):
+            p = F.normalize(p, p=2, dim=-1)
+            z = F.normalize(z, p=2, dim=-1)
+            return -(p * z).sum(dim=-1).mean()
 
-        s_logit = F.linear(s_embed_norm, vocab_weight_norm)
-        with torch.no_grad():
-            t_logit = F.linear(t_embed_norm, vocab_weight_norm)
-
-        s_z1, s_z2 = torch.chunk(s_logit, 2, dim=0)
-        with torch.no_grad():
-            t_z1, t_z2 = torch.chunk(t_logit, 2, dim=0)
-
-        loss = (self.dino_loss(s_z1, t_z2) + self.dino_loss(s_z2, t_z1)) * 0.5
-        self.dino_loss.update_center(t_logit)
+        loss = (cosine_loss(p_z1, t_z2) + cosine_loss(p_z2, t_z1)) * 0.5
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
