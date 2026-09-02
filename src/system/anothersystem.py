@@ -96,7 +96,7 @@ class AnotherSystem(L.LightningModule):
     def setup_bert(self, device_info) -> tuple[BertModel, AutoTokenizer]:
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
-        model_name = self.cfg.get("model_name", "bert-large-uncased")
+        model_name = self.cfg.get("model_name", "bert-base-uncased")
 
         def build_model():
             model = BertModel.from_pretrained(
@@ -127,7 +127,13 @@ class AnotherSystem(L.LightningModule):
                 lora_dropout=0.05,
                 bias="none",
             )
-            return get_peft_model(model, peft_config)
+            model = get_peft_model(model, peft_config)
+
+            for name, p in model.named_parameters():
+                if "LayerNorm" in name or "bias" in name:
+                    p.requires_grad = True
+
+            return model
 
         s_bert = build_model().train()
         t_bert = build_model().eval()
@@ -146,7 +152,14 @@ class AnotherSystem(L.LightningModule):
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         with torch.no_grad():
-            # head
+            # Backbone LoRA
+            for s_p, t_p in zip(self.s_bert.parameters(), self.t_bert.parameters()):
+                if s_p.requires_grad:
+                    t_p.data.mul_(self.ema_decay).add_(
+                        s_p.data, alpha=1.0 - self.ema_decay
+                    )
+
+            # Head
             for s, t in zip(self.s_head.parameters(), self.t_head.parameters()):
                 t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
@@ -209,7 +222,7 @@ class AnotherSystem(L.LightningModule):
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            s_bert_outs = self.t_bert(**inputs)
+            s_bert_outs = self.s_bert(**inputs)
             pooled = self.get_sentence_embedding(s_bert_outs, inputs)
             embeddings = self.s_head(pooled)
 
