@@ -200,7 +200,9 @@ class AnotherSystem(L.LightningModule):
         self.s_bert.train()
 
     def on_validation_epoch_end(self):
-        metrics = self.evaluator.eval(self)
+        metrics = {}
+        metrics.update(self.evaluator.eval(self, prefix="head", use_head=True))
+        metrics.update(self.evaluator.eval(self, prefix="backbone", use_head=False))
         self.log_dict(metrics, prog_bar=True, on_epoch=True)
 
     @torch.no_grad()
@@ -212,6 +214,7 @@ class AnotherSystem(L.LightningModule):
         **kwargs,
     ) -> np.ndarray:
         self.eval()
+        use_head = kwargs.get("use_head", False)
         all_embeddings = []
 
         for i in range(0, len(sentences), batch_size):
@@ -224,8 +227,8 @@ class AnotherSystem(L.LightningModule):
 
             s_bert_outs = self.s_bert(**inputs)
             pooled = self.get_sentence_embedding(s_bert_outs, inputs)
-            embeddings = self.s_head(pooled)
 
+            embeddings = self.s_head(pooled) if use_head else pooled
             embeddings = F.normalize(embeddings, p=2, dim=-1)
 
             all_embeddings.append(embeddings.cpu().numpy())

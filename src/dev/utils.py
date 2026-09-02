@@ -5,7 +5,7 @@ def setup_device() -> tuple[str, int | str, str, bool]:
     if torch.cuda.is_available():
         accelerator = "gpu"
         devices = 1
-        precision = "bf16-mixed"
+        precision = "bf16-mixed" if torch.cuda.is_bf16_supported() else "16-mixed"
         use_compile = True
     else:
         accelerator = "cpu"

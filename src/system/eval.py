@@ -10,9 +10,9 @@ class Evaluator:
         self.sentences2 = self.stsb_data["sentence2"]
         self.gold_scores = np.array(self.stsb_data["score"])
 
-    def eval(self, system):
-        embeddings1 = system.encode(self.sentences1)
-        embeddings2 = system.encode(self.sentences2)
+    def eval(self, system, prefix: str | None = None, **kwargs):
+        embeddings1 = system.encode(self.sentences1, **kwargs)
+        embeddings2 = system.encode(self.sentences2, **kwargs)
 
         # Cos sim + Spearman
         emb1_norm = embeddings1 / np.maximum(
@@ -36,9 +36,9 @@ class Evaluator:
         np.fill_diagonal(cov, 0)
 
         return {
-            "eval/spearman": float(spearman_score),
-            "repr/anisotropy": float(np.mean(all_norm @ all_norm.T)),
-            "repr/feature_std_mean": float(np.mean(np.std(all_emb, axis=0))),
-            "repr/cov_offdiag_abs_mean": float(np.mean(np.abs(cov))),
-            "repr/norm_mean": float(np.mean(np.linalg.norm(all_emb, axis=1))),
+            f"eval/{prefix}_spearman": float(spearman_score),
+            f"repr/{prefix}_anisotropy": float(np.mean(all_norm @ all_norm.T)),
+            f"repr/{prefix}_feature_std_mean": float(np.mean(np.std(all_emb, axis=0))),
+            f"repr/{prefix}_cov_offdiag_abs_mean": float(np.mean(np.abs(cov))),
+            f"repr/{prefix}_norm_mean": float(np.mean(np.linalg.norm(all_emb, axis=1))),
         }
