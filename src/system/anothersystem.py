@@ -181,10 +181,10 @@ class AnotherSystem(L.LightningModule):
         pass
 
     def on_validation_start(self):
-        self.bert.eval()
+        self.s_bert.eval()
 
     def on_validation_end(self):
-        self.bert.train()
+        self.s_bert.train()
 
     def on_validation_epoch_end(self):
         metrics = self.evaluator.eval(self)
