@@ -68,3 +68,17 @@ class VarianceLoss(nn.Module):
         std_z = torch.sqrt(z.var(dim=0) + 1e-04)
         var_loss = torch.mean((std_z - self.target_std) ** 2)
         return var_loss
+
+
+class LogVarianceLoss(nn.Module):
+    def __init__(self, target_std=0.25):
+        super().__init__()
+        self.log_target_std = torch.log(torch.tensor(target_std))
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        std_z = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-04)
+        log_std_z = torch.log(std_z)
+
+        diff = torch.relu(self.log_target_std - log_std_z)
+        var_loss = torch.mean(diff**2)
+        return var_loss
