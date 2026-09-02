@@ -44,6 +44,9 @@ class OtherSystem(L.LightningModule):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
+        self.register_buffer("t_center", torch.zeros(1, hidden_dim))
+        self.center_momentum = cfg.get("center_momentum", 0.9)
+
         self.dino_loss = self.setup_loss(vocab_size)
 
         self.evaluator = Evaluator()
@@ -56,11 +59,16 @@ class OtherSystem(L.LightningModule):
         comb_attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
 
         with torch.no_grad():
-            output = self.bert(
+            bert_outs = self.bert(
                 input_ids=comb_input_ids, attention_mask=comb_attention_mask
-            ).last_hidden_state
+            )
 
-        s_output = self.s_head(output, comb_attention_mask)
+            output = output = (
+                bert_outs.hidden_states[-1] + bert_outs.hidden_states[-2]
+            ) / 2.0
+
+        s_input = F.dropout(output, p=0.1, training=True)
+        s_output = self.s_head(s_input, comb_attention_mask)
         with torch.no_grad():
             t_output = self.t_head(output, comb_attention_mask)
 
@@ -71,6 +79,13 @@ class OtherSystem(L.LightningModule):
             t_embed = self.get_sentence_embedding(
                 t_output, {"attention_mask": comb_attention_mask}
             )
+
+            batch_center = t_embed.mean(dim=0, keepdim=True)
+            self.t_center = self.t_center * self.center_momentum + batch_center * (
+                1.0 - self.center_momentum
+            )
+
+            t_embed = t_embed - self.t_center
 
         p_embed = self.predictor(s_embed)
 
@@ -97,6 +112,7 @@ class OtherSystem(L.LightningModule):
             attn_implementation=attn_mode,
             hidden_dropout_prob=0.15,
             attention_probs_dropout_prob=0.15,
+            output_hidden_states=True,
         ).train()
 
         for param in bert.parameters():
@@ -134,7 +150,11 @@ class OtherSystem(L.LightningModule):
 
     def configure_optimizers(self):
         trainable_params = filter(lambda p: p.requires_grad, self.parameters())
-        return torch.optim.AdamW(trainable_params, lr=self.cfg.get("lr", 3e-5))
+        optimizer = torch.optim.AdamW(trainable_params, lr=self.cfg.get("lr", 3e-5))
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_steps
+        )
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
     def validation_step(self, batch, batch_idx):
         pass
@@ -168,8 +188,11 @@ class OtherSystem(L.LightningModule):
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            bert_output = self.bert(**inputs).last_hidden_state
-            head_output = self.s_head(bert_output, inputs["attention_mask"])
+            bert_outs = self.bert(**inputs)
+            bert_output = (
+                bert_outs.hidden_states[-1] + bert_outs.hidden_states[-2]
+            ) / 2.0
+            head_output = self.t_head(bert_output, inputs["attention_mask"])
             embeddings = self.get_sentence_embedding(head_output, inputs)
 
             embeddings = F.normalize(embeddings, p=2, dim=-1)
