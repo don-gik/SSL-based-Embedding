@@ -9,7 +9,6 @@ from omegaconf import DictConfig
 from transformers import AutoTokenizer, BertModel
 
 from src.system.eval import Evaluator
-from src.system.layer import change_noise_std
 from src.system.loss import CovarianceLoss, DinoLoss, VarianceLoss
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ class DinoDropoutSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.99)
+        self.ema_decay = cfg.get("ema_decay", 0.995)
 
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
@@ -55,10 +54,6 @@ class DinoDropoutSystem(L.LightningModule):
         self.teacher_bert.eval()
         self.teacher_mlp_head.eval()
 
-        teacher_noise_std = cfg.get("teacher_noise_std", 0.01)
-        change_noise_std(self.teacher_bert, new_std=teacher_noise_std)
-        self.teacher_bert.eval()
-
         self.evaluator = Evaluator()
         self.model_card_data = None
 
@@ -68,8 +63,8 @@ class DinoDropoutSystem(L.LightningModule):
         self.covarianceloss = CovarianceLoss()
         self.varianceloss = VarianceLoss()
 
-        self.cov_weight = 3.0
-        self.var_weight = 3.0
+        self.cov_weight = 1000.0
+        self.var_weight = 1000.0
 
         logger.info("DINO Noise System initialized.")
 
@@ -97,9 +92,9 @@ class DinoDropoutSystem(L.LightningModule):
         z1 = self.mlp_head(embedding1)
         z2 = self.teacher_mlp_head(embedding2)
 
-        dino_loss = self.dino_loss(z1, z2)
-        cov_loss = self.covarianceloss(z1)
-        var_loss = self.varianceloss(z1)
+        dino_loss = self.dino_loss(z1, z2, self.global_step)
+        cov_loss = self.cov_weight * self.covarianceloss(z1)
+        var_loss = self.var_weight * self.varianceloss(z1)
 
         loss = dino_loss + cov_loss + var_loss
 

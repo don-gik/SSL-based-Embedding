@@ -94,7 +94,7 @@ class DinoNoiseSystem(L.LightningModule):
         z1 = self.mlp_head(embedding1)
         z2 = self.teacher_mlp_head(embedding2)
 
-        dino_loss = self.dino_loss(z1, z2)
+        dino_loss = self.dino_loss(z1, z2, self.global_step)
         cov_loss = self.covarianceloss(z1)
         var_loss = self.varianceloss(z1)
 

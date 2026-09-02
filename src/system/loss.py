@@ -36,6 +36,7 @@ class DinoLoss(nn.Module):
     def __init__(
         self,
         out_dim: int,
+        warmup_center_momentum: float = 0.7,
         center_momentum: float = 0.9,
         student_temp: float = 0.2,
         teacher_temp: float = 0.1,
@@ -44,12 +45,13 @@ class DinoLoss(nn.Module):
         super().__init__()
         self.student_temp = student_temp
         self.teacher_temp = teacher_temp
+        self.warmup_center_momentum = warmup_center_momentum
         self.center_momentum = center_momentum
         self.warmup_steps = warmup_steps
 
         self.register_buffer("center", torch.zeros(1, out_dim))
 
-    def forward(self, student_output, teacher_output):
+    def forward(self, student_output, teacher_output, global_step):
         # 1. Sharpening
         student_out = student_output / self.student_temp
         teacher_out = F.softmax(
@@ -62,7 +64,7 @@ class DinoLoss(nn.Module):
         loss = -torch.sum(teacher_out * log_probs, dim=-1).mean()
 
         # 3. Update Center
-        self.update_center(teacher_output)
+        self.update_center(teacher_output, global_step)
 
         return loss
 
