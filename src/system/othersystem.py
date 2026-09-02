@@ -174,6 +174,8 @@ class OtherSystem(L.LightningModule):
             head_output = self.s_head(bert_output, inputs["attention_mask"])
             embeddings = self.get_sentence_embedding(head_output, inputs)
 
+            embeddings = F.normalize(embeddings, p=2, dim=-1)
+
             all_embeddings.append(embeddings.cpu().numpy())
 
         return np.vstack(all_embeddings)
