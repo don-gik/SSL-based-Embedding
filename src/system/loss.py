@@ -1,5 +1,40 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+class DinoLoss(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        s_temp: float = 0.15,
+        t_temp: float = 0.07,
+        center_momentum: float = 0.9,
+    ):
+        super().__init__()
+
+        self.vocab_size = vocab_size
+        self.s_temp = s_temp
+        self.t_temp = t_temp
+        self.center_momentum = center_momentum
+
+        self.register_buffer("center", torch.zeros(1, vocab_size))
+
+    def forward(self, s_logit: torch.Tensor, t_logit: torch.Tensor) -> torch.Tensor:
+        s_log_probs = F.log_softmax(s_logit / self.s_temp, dim=-1)
+        t_probs = F.softmax((t_logit - self.center) / self.t_temp, dim=-1)
+
+        loss = torch.sum(-t_probs * s_log_probs, dim=-1).mean()
+        return loss
+
+    @torch.no_grad
+    def update_center(self, t_logit: torch.Tensor):
+        batch_center = torch.sum(t_logit, dim=0, keepdim=True)
+        batch_center = batch_center / len(t_logit)
+
+        self.center = self.center * self.center_momentum + batch_center * (
+            1 - self.center_momentum
+        )
 
 
 class CovarianceLoss(nn.Module):

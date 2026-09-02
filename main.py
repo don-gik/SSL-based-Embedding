@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.data import get_wikitext_sentence_dataloader
 from src.dev import setup_device
-from src.system import TheSystem
+from src.system import OtherSystem, TheSystem
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ def main(cfg: DictConfig):
     (accelerate, devices, precision, use_compile) = setup_device()
     system_dict: dict[str, L.LightningModule] = {
         "the system": TheSystem,
+        "other system": OtherSystem,
     }
 
     logger.info("Running test with stuffs below : ")
@@ -59,7 +60,7 @@ def main(cfg: DictConfig):
             cfg, (accelerate, devices, precision, use_compile)
         )
 
-        logger.info(f"System: {cfg.get("system_name", default_value="SimCSE_Noise")}")
+        logger.info(f"System: {cfg.get('system_name', default_value='SimCSE_Noise')}")
 
         trainer = L.Trainer(
             logger=tensorboardlogger,

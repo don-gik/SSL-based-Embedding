@@ -4,7 +4,6 @@ from scipy.stats import spearmanr
 
 
 class Evaluator:
-
     def __init__(self):
         self.stsb_data = load_dataset("sentence-transformers/stsb", split="test")
         self.sentences1 = self.stsb_data["sentence1"]
