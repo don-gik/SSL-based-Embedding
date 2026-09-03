@@ -35,9 +35,13 @@ class Evaluator:
         cov = (centered.T @ centered) / (N - 1)
         np.fill_diagonal(cov, 0)
 
+        sq_distances = 2.0 - 2.0 * (all_norm @ all_norm.T)
+        np.fill_diagonal(sq_distances, float("inf"))
+        uniformity = np.log(np.sum(np.exp(-2.0 * sq_distances)) / (N * (N - 1)))
+
         return {
             f"eval/{prefix}_spearman": float(spearman_score),
-            f"repr/{prefix}_anisotropy": float(np.mean(all_norm @ all_norm.T)),
+            f"repr/{prefix}_uniformity": float(uniformity),
             f"repr/{prefix}_feature_std_mean": float(np.mean(np.std(all_emb, axis=0))),
             f"repr/{prefix}_cov_offdiag_abs_mean": float(np.mean(np.abs(cov))),
             f"repr/{prefix}_norm_mean": float(np.mean(np.linalg.norm(all_emb, axis=1))),

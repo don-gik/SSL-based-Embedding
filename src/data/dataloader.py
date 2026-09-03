@@ -13,7 +13,7 @@ def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased",
     batch_size=48,
     cache_dir="./.dataset_cache",
-    num_workers=7,
+    num_workers=16,
     repetition=False,
 ):
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
@@ -57,9 +57,9 @@ def get_wikitext_sentence_dataloader(
             tokenizer=tokenizer, return_tensors="pt"
         )
     else:
-        from src.data.collator import RepetitionCollator
+        from src.data.collator import RepetitionShuffleCollator
 
-        data_collator = RepetitionCollator(tokenizer=tokenizer, rep_prob=0.15)
+        data_collator = RepetitionShuffleCollator(tokenizer=tokenizer, rep_prob=0.15)
 
     train_loader = DataLoader(
         processed_datasets["train"],

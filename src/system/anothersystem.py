@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, BertModel
+from transformers import AutoTokenizer, BertModel, get_cosine_schedule_with_warmup
 
 from src.system.eval import Evaluator
 
@@ -20,7 +20,7 @@ class AnotherSystem(L.LightningModule):
         self.save_hyperparameters(ignore=["cfg", "tokenizer", "evaluator"])
 
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.995)
+        self.ema_decay = cfg.get("ema_decay", 0.996)
 
         self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(device_info)
 
@@ -40,7 +40,7 @@ class AnotherSystem(L.LightningModule):
         self.predictor = build_mlp(hidden_dim).train()
 
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
-        self.center_momentum = cfg.get("center_momentum", 0.9)
+        self.center_momentum = cfg.get("center_momentum", 0.95)
 
         self.evaluator = Evaluator()
 
@@ -175,8 +175,10 @@ class AnotherSystem(L.LightningModule):
         optimizer = torch.optim.AdamW(
             trainable_params, lr=self.cfg.get("lr", 5e-5), weight_decay=0.01
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.trainer.max_steps, eta_min=1e-6
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=int(self.trainer.estimated_stepping_batches * 0.05),
+            num_training_steps=self.trainer.estimated_stepping_batches,
         )
         return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 

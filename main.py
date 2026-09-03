@@ -14,6 +14,7 @@ import hydra
 import lightning as L
 import nltk
 import torch
+from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, TensorDataset
@@ -67,9 +68,12 @@ def main(cfg: DictConfig):
 
         logger.info(f"System: {cfg.get('system_name', default_value='SimCSE_Noise')}")
 
+        lr_callback = LearningRateMonitor()
+
         trainer = L.Trainer(
             logger=tensorboardlogger,
             max_epochs=cfg.epochs,
+            callbacks=[lr_callback],
             accelerator="auto",
             val_check_interval=250,
             check_val_every_n_epoch=None,
