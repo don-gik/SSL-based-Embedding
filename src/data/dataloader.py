@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased",
-    batch_size=48,
+    batch_size=128,
     cache_dir="./.dataset_cache",
     num_workers=16,
     repetition=False,
@@ -29,12 +29,28 @@ def get_wikitext_sentence_dataloader(
                 continue
 
             sentences = nltk.sent_tokenize(text)
-            all_sentences.extend(sentences)
+            for s in sentences:
+                s = s.strip()
+                if 5 <= len(s.split()) <= 80:
+                    all_sentences.append(s)
 
-        tokenized = tokenizer(
-            all_sentences, truncation=True, max_length=512, add_special_tokens=True
-        )
-        return tokenized
+        tokenized = tokenizer(all_sentences, truncation=False, add_special_tokens=True)
+
+        filtered_input_ids = []
+        filtered_attention_mask = []
+
+        for input_ids, attn_mask in zip(
+            tokenized["input_ids"], tokenized["attention_mask"]
+        ):
+            token_len = len(input_ids)
+            if 10 <= token_len <= 60:
+                filtered_input_ids.append(input_ids)
+                filtered_attention_mask.append(attn_mask)
+
+        return {
+            "input_ids": filtered_input_ids,
+            "attention_mask": filtered_attention_mask,
+        }
 
     logger.info("Splitting into sentences and caching")
     processed_datasets = raw_datasets.map(
