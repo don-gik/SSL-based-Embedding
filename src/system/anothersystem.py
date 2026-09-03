@@ -45,18 +45,12 @@ class AnotherSystem(L.LightningModule):
         self.evaluator = Evaluator()
 
     def training_step(self, batch, batch_idx):
-        input_ids = batch["input_ids"]
-        attention_mask = batch["attention_mask"]
-
-        comb_input_ids = torch.cat([input_ids, input_ids], dim=0)
-        comb_attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
-
         # Student
         s_bert_outs = self.s_bert(
-            input_ids=comb_input_ids, attention_mask=comb_attention_mask
+            input_ids=batch["s_input_ids"], attention_mask=batch["s_attention_mask"]
         )
         s_pooled = self.get_sentence_embedding(
-            s_bert_outs, {"attention_mask": comb_attention_mask}
+            s_bert_outs, {"attention_mask": batch["s_attention_mask"]}
         )  # [B, D]
 
         s_embed = self.s_head(F.dropout(s_pooled, p=0.1, training=True))  # [B, D]
@@ -65,10 +59,10 @@ class AnotherSystem(L.LightningModule):
         # Teacher
         with torch.no_grad():
             t_bert_outs = self.t_bert(
-                input_ids=comb_input_ids, attention_mask=comb_attention_mask
+                input_ids=batch["t_input_ids"], attention_mask=batch["t_attention_mask"]
             )
             t_pooled = self.get_sentence_embedding(
-                t_bert_outs, {"attention_mask": comb_attention_mask}
+                t_bert_outs, {"attention_mask": batch["t_attention_mask"]}
             )  # [B, D]
 
             t_embed = self.t_head(t_pooled)  # [B, D]
@@ -79,16 +73,12 @@ class AnotherSystem(L.LightningModule):
             )
             t_embed = t_embed - self.t_center
 
-        p_z1, p_z2 = torch.chunk(p_embed, 2, dim=0)
-        with torch.no_grad():
-            t_z1, t_z2 = torch.chunk(t_embed, 2, dim=0)
-
         def cosine_loss(p, z):
             p = F.normalize(p, p=2, dim=-1)
             z = F.normalize(z, p=2, dim=-1)
             return -(p * z).sum(dim=-1).mean()
 
-        loss = (cosine_loss(p_z1, t_z2) + cosine_loss(p_z2, t_z1)) * 0.5
+        loss = cosine_loss(p_embed, t_embed)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss

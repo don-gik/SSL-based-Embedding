@@ -58,7 +58,9 @@ def main(cfg: DictConfig):
         tensorboardlogger = TensorBoardLogger(
             "tb_logs", name=cfg.get("system_name", default_value="SimCSE_Noise")
         )
-        dataloader = get_wikitext_sentence_dataloader()
+        dataloader = get_wikitext_sentence_dataloader(
+            repetition=cfg.get("repetition", False)
+        )
         system = system_dict[cfg.get("system_name", default_value="SimCSE_Noise")](
             cfg, (accelerate, devices, precision, use_compile)
         )

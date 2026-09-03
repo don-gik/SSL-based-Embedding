@@ -14,6 +14,7 @@ def get_wikitext_sentence_dataloader(
     batch_size=48,
     cache_dir="./.dataset_cache",
     num_workers=7,
+    repetition=False,
 ):
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
@@ -49,9 +50,16 @@ def get_wikitext_sentence_dataloader(
 
     processed_datasets.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
-    from transformers import DataCollatorWithPadding
+    if not repetition:
+        from transformers import DataCollatorWithPadding
 
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer, return_tensors="pt")
+        data_collator = DataCollatorWithPadding(
+            tokenizer=tokenizer, return_tensors="pt"
+        )
+    else:
+        from src.data.collator import RepetitionCollator
+
+        data_collator = RepetitionCollator(tokenizer=tokenizer, rep_prob=0.15)
 
     train_loader = DataLoader(
         processed_datasets["train"],
