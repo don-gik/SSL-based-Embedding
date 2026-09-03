@@ -5,7 +5,7 @@ from scipy.stats import spearmanr
 
 class Evaluator:
     def __init__(self):
-        self.stsb_data = load_dataset("sentence-transformers/stsb", split="test")
+        self.stsb_data = load_dataset("sentence-transformers/stsb", split="validation")
         self.sentences1 = self.stsb_data["sentence1"]
         self.sentences2 = self.stsb_data["sentence2"]
         self.gold_scores = np.array(self.stsb_data["score"])
