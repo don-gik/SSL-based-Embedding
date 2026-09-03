@@ -45,26 +45,19 @@ class AnotherSystem(L.LightningModule):
         self.evaluator = Evaluator()
 
     def training_step(self, batch, batch_idx):
-        # Student
-        s_bert_outs = self.s_bert(
+        # Students
+        s_outs = self.s_bert(
             input_ids=batch["s_input_ids"], attention_mask=batch["s_attention_mask"]
         )
-        s_pooled = self.get_sentence_embedding(
-            s_bert_outs, {"attention_mask": batch["s_attention_mask"]}
-        )  # [B, D]
-
-        s_embed = self.s_head(F.dropout(s_pooled, p=0.1, training=True))  # [B, D]
-        p_embed = self.predictor(s_embed)  # [B, D]
+        s_pooled = self.get_sentence_embedding(s_outs, batch)
+        s_embed = self.s_head(s_pooled)  # [B, D]
 
         # Teacher
         with torch.no_grad():
-            t_bert_outs = self.t_bert(
+            t_outs = self.t_bert(
                 input_ids=batch["t_input_ids"], attention_mask=batch["t_attention_mask"]
             )
-            t_pooled = self.get_sentence_embedding(
-                t_bert_outs, {"attention_mask": batch["t_attention_mask"]}
-            )  # [B, D]
-
+            t_pooled = self.get_sentence_embedding(t_outs, batch)
             t_embed = self.t_head(t_pooled)  # [B, D]
 
             batch_center = t_embed.mean(dim=0, keepdim=True)
@@ -73,12 +66,30 @@ class AnotherSystem(L.LightningModule):
             )
             t_embed = t_embed - self.t_center
 
-        def cosine_loss(p, z):
-            p = F.normalize(p, p=2, dim=-1)
-            z = F.normalize(z, p=2, dim=-1)
-            return -(p * z).sum(dim=-1).mean()
+        batch_size = s_embed.size(0)
+        perm = torch.randperm(batch_size)
 
-        loss = cosine_loss(p_embed, t_embed)
+        lam = torch.rand(batch_size, 1, device=self.device) * 0.8 + 0.1
+
+        s_mixed = lam * s_embed + (1.0 - lam) * s_embed[perm]
+
+        # Predictor
+        p_mixed = self.predictor(s_mixed)
+        p_norm = F.normalize(p_mixed, p=2, dim=-1)
+
+        t_norm_1 = F.normalize(t_embed, p=2, dim=-1)
+        t_norm_2 = F.normalize(t_embed[perm], p=2, dim=-1)
+
+        cos_1 = (p_norm * t_norm_1).sum(dim=-1, keepdim=True)
+        cos_2 = (p_norm * t_norm_2).sum(dim=-1, keepdim=True)
+
+        loss_calib_1 = F.mse_loss(cos_1, lam)
+        loss_calib_2 = F.mse_loss(cos_2, 1.0 - lam)
+
+        p_orig = F.normalize(self.predictor(s_embed), p=2, dim=-1)
+        loss_cos_sim = -(p_orig * t_norm_1).sum(dim=-1).mean()
+
+        loss = loss_cos_sim + 1.0 * (loss_calib_1 + loss_calib_2)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
