@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from peft import LoraConfig, get_peft_model
+from tqdm import tqdm
 from transformers import AutoTokenizer, BertModel, get_cosine_schedule_with_warmup
 
 from src.system.eval import Evaluator
@@ -206,13 +207,18 @@ class TheSystem(L.LightningModule):
         sentences: list[str],
         batch_size: int = 64,
         show_progress_bar: bool = False,
+        convert_to_numpy: bool = False,
         **kwargs,
-    ) -> np.ndarray:
+    ) -> torch.Tensor | np.ndarray:
         self.eval()
         use_head = kwargs.get("use_head", False)
         all_embeddings = []
 
-        for i in range(0, len(sentences), batch_size):
+        iterator = range(0, len(sentences), batch_size)
+        if show_progress_bar:
+            iterator = tqdm(iterator, desc="Encoding sentences")
+
+        for i in iterator:
             batch_text = sentences[i : i + batch_size]
 
             inputs = self.tokenizer(
@@ -226,6 +232,11 @@ class TheSystem(L.LightningModule):
             embeddings = self.s_head(pooled) if use_head else pooled
             embeddings = F.normalize(embeddings, p=2, dim=-1)
 
-            all_embeddings.append(embeddings.cpu().numpy())
+            all_embeddings.append(embeddings)
 
-        return np.vstack(all_embeddings)
+        full_embeddings = torch.cat(all_embeddings, dim=0)
+
+        if convert_to_numpy:
+            return full_embeddings.cpu().numpy()
+
+        return full_embeddings

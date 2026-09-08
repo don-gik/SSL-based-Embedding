@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+import torch.nn.functional as F
 from datasets import load_dataset
 from scipy.stats import pearsonr, spearmanr
 
@@ -11,78 +13,95 @@ class Evaluator:
         self.gold_scores = np.array(self.stsb_data["score"])
         self.high_score_threshold = high_score_threshold
 
+    @torch.no_grad()
     def eval(self, system, prefix: str | None = None, **kwargs) -> dict[str, float]:
         prefix_str = f"{prefix}/" if prefix else ""
+        device = system.device
 
-        embeddings1 = system.encode(self.sentences1, **kwargs)
-        embeddings2 = system.encode(self.sentences2, **kwargs)
+        emb1 = system.encode(self.sentences1, **kwargs)
+        emb2 = system.encode(self.sentences2, **kwargs)
 
-        # Normalization
-        emb1_norm = embeddings1 / np.maximum(
-            np.linalg.norm(embeddings1, axis=1, keepdims=True), 1e-8
-        )
-        emb2_norm = embeddings2 / np.maximum(
-            np.linalg.norm(embeddings2, axis=1, keepdims=True), 1e-8
-        )
-        cosine_similarities = np.sum(emb1_norm * emb2_norm, axis=1)
+        if isinstance(emb1, np.ndarray):
+            emb1 = torch.from_numpy(emb1)
+        if isinstance(emb2, np.ndarray):
+            emb2 = torch.from_numpy(emb2)
+
+        emb1 = emb1.to(device)
+        emb2 = emb2.to(device)
+
+        # -------------------------------------------------------------
+        # 1. Normalization & Cosine Similarity
+        # -------------------------------------------------------------
+        emb1_norm = F.normalize(emb1, p=2, dim=-1)
+        emb2_norm = F.normalize(emb2, p=2, dim=-1)
+        cosine_similarities = (emb1_norm * emb2_norm).sum(dim=-1).cpu().numpy()
 
         # Spearman & Pearson
         spearman_score, _ = spearmanr(self.gold_scores, cosine_similarities)
         pearson_score, _ = pearsonr(self.gold_scores, cosine_similarities)
 
-        # Alignment
-        pos_mask = self.gold_scores >= self.high_score_threshold
-        if np.sum(pos_mask) > 0:
+        # -------------------------------------------------------------
+        # 2. Alignment (GPU)
+        # -------------------------------------------------------------
+        pos_mask = torch.tensor(
+            self.gold_scores >= self.high_score_threshold, device=device
+        )
+        if pos_mask.sum() > 0:
             diff = emb1_norm[pos_mask] - emb2_norm[pos_mask]
-            alignment = float(np.mean(np.sum(diff**2, axis=1)))
+            alignment = float((diff**2).sum(dim=-1).mean().item())
         else:
             alignment = 0.0
 
-        # Uniformity
-        all_emb = np.concatenate([embeddings1, embeddings2], axis=0)
-        N, D = all_emb.shape
+        # -------------------------------------------------------------
+        # 3. Uniformity
+        # -------------------------------------------------------------
+        all_emb = torch.cat([emb1, emb2], dim=0)
+        all_norm = torch.cat([emb1_norm, emb2_norm], dim=0)
+        N, D = all_norm.shape
 
-        all_norm = all_emb / np.maximum(
-            np.linalg.norm(all_emb, axis=1, keepdims=True), 1e-8
-        )
+        sim_matrix = all_norm @ all_norm.T
+        sq_distances = torch.clamp(2.0 - 2.0 * sim_matrix, min=0.0, max=4.0)
+        sq_distances.fill_diagonal_(float("inf"))
 
-        # clip + uniformity
-        sq_distances = np.clip(2.0 - 2.0 * (all_norm @ all_norm.T), 0.0, 4.0)
-        np.fill_diagonal(sq_distances, float("inf"))
         uniformity = float(
-            np.log(np.sum(np.exp(-2.0 * sq_distances)) / (N * (N - 1) + 1e-8))
+            torch.log(
+                torch.exp(-2.0 * sq_distances).sum() / (N * (N - 1) + 1e-8)
+            ).item()
         )
 
-        centered = all_emb - np.mean(all_emb, axis=0, keepdims=True)
+        # -------------------------------------------------------------
+        # 4. Dimensional Collapse & SVD (GPU)
+        # -------------------------------------------------------------
+        centered = all_emb - all_emb.mean(dim=0, keepdim=True)
 
-        # SVD
-        _, S, _ = np.linalg.svd(centered, full_matrices=False)
-        S_sum = np.sum(S) + 1e-8
+        # GPU SVD 분해
+        _, S, _ = torch.linalg.svd(centered, full_matrices=False)
+        S_sum = S.sum() + 1e-8
 
-        # Top-1 sv ratio
-        top1_sv_ratio = float(S[0] / S_sum)
+        top1_sv_ratio = float((S[0] / S_sum).item())
 
-        # Effective Rank
         p = S / S_sum
-        entropy = -np.sum(p * np.log(p + 1e-12))
-        effective_rank = float(np.exp(entropy))
+        entropy = -torch.sum(p * torch.log(p + 1e-12))
+        effective_rank = float(torch.exp(entropy).item())
 
-        # 90% dim pct
-        cum_var_ratio = np.cumsum(S**2) / (np.sum(S**2) + 1e-8)
-        dim_90_pct = float(np.searchsorted(cum_var_ratio, 0.90) + 1)
+        cum_var_ratio = torch.cumsum(S**2, dim=0) / (torch.sum(S**2) + 1e-8)
+        dim_90_pct = float(
+            torch.searchsorted(cum_var_ratio, torch.tensor(0.90, device=device)).item()
+            + 1
+        )
 
-        # Random cos sim
-        off_diag_mask = ~np.eye(N, dtype=bool)
-        avg_random_cos_sim = float(np.mean((all_norm @ all_norm.T)[off_diag_mask]))
+        # -------------------------------------------------------------
+        # 5. Anisotropy & Space Statistics (GPU)
+        # -------------------------------------------------------------
+        off_diag_mask = ~torch.eye(N, dtype=torch.bool, device=device)
+        avg_random_cos_sim = float(sim_matrix[off_diag_mask].mean().item())
 
-        # std per dim
-        std_per_dim = np.std(all_emb, axis=0)
-        dead_dims_count = float(np.sum(std_per_dim < 1e-4))
+        std_per_dim = torch.std(all_emb, dim=0)
+        dead_dims_count = float((std_per_dim < 1e-4).sum().item())
 
-        # Off diag cov
         cov = (centered.T @ centered) / (N - 1)
-        np.fill_diagonal(cov, 0)
-        cov_offdiag_abs_mean = float(np.mean(np.abs(cov)))
+        cov.fill_diagonal_(0.0)
+        cov_offdiag_abs_mean = float(cov.abs().mean().item())
 
         return {
             # Performance
@@ -99,8 +118,10 @@ class Evaluator:
             # Anisotropy
             f"anisotropy/{prefix_str}avg_random_cos_sim": avg_random_cos_sim,
             f"anisotropy/{prefix_str}cov_offdiag_abs_mean": cov_offdiag_abs_mean,
-            f"anisotropy/{prefix_str}feature_std_mean": float(np.mean(std_per_dim)),
+            f"anisotropy/{prefix_str}feature_std_mean": float(
+                std_per_dim.mean().item()
+            ),
             f"anisotropy/{prefix_str}norm_mean": float(
-                np.mean(np.linalg.norm(all_emb, axis=1))
+                torch.linalg.norm(all_emb, dim=1).mean().item()
             ),
         }
