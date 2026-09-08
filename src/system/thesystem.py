@@ -98,7 +98,9 @@ class TheSystem(L.LightningModule):
         s_outs = self.s_bert(
             input_ids=s_input_ids_masked, attention_mask=batch["s_attention_mask"]
         )
-        s_pooled = self.get_sentence_embedding(s_outs, batch)
+        s_pooled = self.get_sentence_embedding(
+            s_outs, {"attention_mask": batch["s_attention_mask"]}
+        )
         s_embed = self.s_head(s_pooled)  # [B, D]
 
         # Teacher
@@ -106,7 +108,9 @@ class TheSystem(L.LightningModule):
             t_outs = self.t_bert(
                 input_ids=batch["t_input_ids"], attention_mask=batch["t_attention_mask"]
             )
-            t_pooled = self.get_sentence_embedding(t_outs, batch)
+            t_pooled = self.get_sentence_embedding(
+                t_outs, {"attention_mask": batch["t_attention_mask"]}
+            )
             t_embed = self.t_head(t_pooled)  # [B, D]
 
             batch_center = t_embed.mean(dim=0, keepdim=True)
