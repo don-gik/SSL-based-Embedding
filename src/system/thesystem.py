@@ -52,51 +52,10 @@ class TheSystem(L.LightningModule):
 
         self.evaluator = Evaluator()
 
-    def do_mask(self, input_ids):
-        device = input_ids.device
-        masked_input_ids = input_ids.clone()
-
-        prob_matrix = torch.full(masked_input_ids.shape, 0.10, device=device)
-
-        special_tokens_mask = (
-            (masked_input_ids == self.tokenizer.cls_token_id)
-            | (masked_input_ids == self.tokenizer.sep_token_id)
-            | (masked_input_ids == self.tokenizer.pad_token_id)
-        )
-        prob_matrix.masked_fill_(special_tokens_mask, value=0.0)
-
-        masked_indices = torch.bernoulli(prob_matrix).bool()
-
-        indices_replaced = (
-            torch.bernoulli(
-                torch.full(masked_input_ids.shape, 0.8, device=device)
-            ).bool()
-            & masked_indices
-        )
-        masked_input_ids[indices_replaced] = self.tokenizer.mask_token_id
-
-        indices_random = (
-            torch.bernoulli(
-                torch.full(masked_input_ids.shape, 0.5, device=device)
-            ).bool()
-            & masked_indices
-            & ~indices_replaced
-        )
-        self.general_token_ids = self.general_token_ids.to(device)
-        random_indices = torch.randint(
-            0, len(self.general_token_ids), masked_input_ids.shape, device=device
-        )
-        random_words = self.general_token_ids[random_indices]
-
-        masked_input_ids[indices_random] = random_words[indices_random]
-
-        return masked_input_ids
-
     def training_step(self, batch, batch_idx):
         # Students
-        s_input_ids_masked = self.do_mask(batch["s_input_ids"])
         s_outs = self.s_bert(
-            input_ids=s_input_ids_masked, attention_mask=batch["s_attention_mask"]
+            input_ids=batch["s_input_ids"], attention_mask=batch["s_attention_mask"]
         )
         s_pooled = self.get_sentence_embedding(
             s_outs, {"attention_mask": batch["s_attention_mask"]}
