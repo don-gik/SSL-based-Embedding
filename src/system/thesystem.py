@@ -1,84 +1,124 @@
-import logging
-
 import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
-from transformers import AutoTokenizer, BertModel
+from peft import LoraConfig, get_peft_model
+from transformers import AutoTokenizer, BertModel, get_cosine_schedule_with_warmup
 
 from src.system.eval import Evaluator
-from src.system.layer import BertAttentionHead
-from src.system.loss import CovarianceLoss, VarianceLoss
-
-logger = logging.getLogger(__name__)
 
 
 class TheSystem(L.LightningModule):
     def __init__(self, cfg: DictConfig, device_info: tuple[str, int | str, str, bool]):
         super().__init__()
-        self.save_hyperparameters(
-            ignore=["cfg", "bert", "tokenizer", "mse_loss", "var_loss", "cov_loss"]
-        )
+        self.save_hyperparameters(ignore=["cfg", "tokenizer", "evaluator"])
 
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.998)
+        self.ema_decay = cfg.get("ema_decay", 0.996)
 
-        self.bert, self.tokenizer = self.setup_bert(device_info)
+        self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(device_info)
 
-        hidden_dim = self.bert.config.hidden_size
+        hidden_dim = self.s_bert.config.hidden_size
 
-        self.s_head = BertAttentionHead(
-            self.bert.config, projection_dim=hidden_dim
-        ).train()
-        self.t_head = BertAttentionHead(
-            self.bert.config, projection_dim=hidden_dim, orth=True
-        ).eval()
+        def build_mlp(hidden_dim):
+            return nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
+                nn.Dropout(self.s_bert.config.hidden_dropout_prob),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
 
-        self.cov_weight = 0.05
-        self.var_weight = 1.0
+        self.s_head = build_mlp(hidden_dim).train()
+        self.t_head = build_mlp(hidden_dim).eval()
+        self.predictor = build_mlp(hidden_dim).train()
 
-        self.mse_loss, self.cov_loss, self.var_loss = self.setup_loss()
+        self.register_buffer("t_center", torch.zeros(1, hidden_dim))
+        self.center_momentum = cfg.get("center_momentum", 0.95)
+
+        vocab_dict = self.tokenizer.get_vocab()
+        special_tokens = set(self.tokenizer.all_special_tokens)
+
+        self.general_token_ids = torch.tensor(
+            [
+                token_id
+                for token, token_id in vocab_dict.items()
+                if token not in special_tokens
+            ],
+            dtype=torch.long,
+        )
 
         self.evaluator = Evaluator()
 
-    def training_step(self, batch, batch_idx):
-        input_ids = batch["input_ids"]
-        attention_mask = batch["attention_mask"]
+    def do_mask(self, input_ids):
+        device = input_ids.device
+        masked_input_ids = input_ids.clone()
 
-        comb_input_ids = torch.cat([input_ids, input_ids], dim=0)
-        comb_attention_mask = torch.cat([attention_mask, attention_mask], dim=0)
+        prob_matrix = torch.full(masked_input_ids.shape, 0.10, device=device)
 
-        with torch.no_grad():
-            output = self.bert(
-                input_ids=comb_input_ids, attention_mask=comb_attention_mask
-            ).last_hidden_state
-
-        s_output = self.s_head(output, comb_attention_mask)
-        with torch.no_grad():
-            t_output = self.t_head(output, comb_attention_mask)
-
-        s_embed = self.get_sentence_embedding(
-            s_output, {"attention_mask": comb_attention_mask}
+        special_tokens_mask = (
+            (masked_input_ids == self.tokenizer.cls_token_id)
+            | (masked_input_ids == self.tokenizer.sep_token_id)
+            | (masked_input_ids == self.tokenizer.pad_token_id)
         )
+        prob_matrix.masked_fill_(special_tokens_mask, value=0.0)
+
+        masked_indices = torch.bernoulli(prob_matrix).bool()
+
+        indices_replaced = (
+            torch.bernoulli(
+                torch.full(masked_input_ids.shape, 0.8, device=device)
+            ).bool()
+            & masked_indices
+        )
+        masked_input_ids[indices_replaced] = self.tokenizer.mask_token_id
+
+        indices_random = (
+            torch.bernoulli(
+                torch.full(masked_input_ids.shape, 0.5, device=device)
+            ).bool()
+            & masked_indices
+            & ~indices_replaced
+        )
+        self.general_token_ids = self.general_token_ids.to(device)
+        random_indices = torch.randint(
+            0, len(self.general_token_ids), masked_input_ids.shape, device=device
+        )
+        random_words = self.general_token_ids[random_indices]
+
+        masked_input_ids[indices_random] = random_words[indices_random]
+
+        return masked_input_ids
+
+    def training_step(self, batch, batch_idx):
+        # Students
+        s_input_ids_masked = self.do_mask(batch["s_input_ids"])
+        s_outs = self.s_bert(
+            input_ids=s_input_ids_masked, attention_mask=batch["s_attention_mask"]
+        )
+        s_pooled = self.get_sentence_embedding(s_outs, batch)
+        s_embed = self.s_head(s_pooled)  # [B, D]
+
+        # Teacher
         with torch.no_grad():
-            t_embed = self.get_sentence_embedding(
-                t_output, {"attention_mask": comb_attention_mask}
+            t_outs = self.t_bert(
+                input_ids=batch["t_input_ids"], attention_mask=batch["t_attention_mask"]
             )
+            t_pooled = self.get_sentence_embedding(t_outs, batch)
+            t_embed = self.t_head(t_pooled)  # [B, D]
 
-        s_z1, s_z2 = torch.chunk(s_embed, 2, dim=0)
-        with torch.no_grad():
-            t_z1, t_z2 = torch.chunk(t_embed, 2, dim=0)
+            batch_center = t_embed.mean(dim=0, keepdim=True)
+            self.t_center = self.t_center * self.center_momentum + batch_center * (
+                1.0 - self.center_momentum
+            )
+            t_embed = t_embed - self.t_center
 
-        mse_loss = (self.mse_loss(s_z1, t_z2) + self.mse_loss(s_z2, t_z1)) * 0.5
-        cov_loss = self.cov_weight * (self.cov_loss(s_z1) + self.cov_loss(s_z2)) * 0.5
-        var_loss = self.var_weight * (self.var_loss(s_z1) + self.var_loss(s_z2)) * 0.5
+        p_embed = self.predictor(s_embed)
 
-        loss = mse_loss + cov_loss + var_loss
-
-        self.log("mse_loss", mse_loss)
-        self.log("cov_loss", cov_loss)
-        self.log("var_loss", var_loss)
+        target = torch.ones(p_embed.size(0), device=p_embed.device)
+        loss = F.cosine_embedding_loss(p_embed, t_embed, target)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -86,27 +126,70 @@ class TheSystem(L.LightningModule):
     def setup_bert(self, device_info) -> tuple[BertModel, AutoTokenizer]:
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
+        model_name = self.cfg.get("model_name", "bert-base-uncased")
 
-        bert = BertModel.from_pretrained(
-            "bert-base-uncased",
-            attn_implementation=attn_mode,
-            hidden_dropout_prob=0.15,
-            attention_probs_dropout_prob=0.15,
-        ).train()
+        def build_model():
+            model = BertModel.from_pretrained(
+                model_name,
+                attn_implementation=attn_mode,
+                hidden_dropout_prob=0.15,
+                attention_probs_dropout_prob=0.15,
+                output_hidden_states=True,
+            )
 
-        for param in bert.parameters():
-            param.requires_grad = False
+            for p in model.parameters():
+                p.requires_grad = False
+
+            for name, p in model.named_parameters():
+                if "LayerNorm" in name or "bias" in name:
+                    p.requires_grad = True
+
+            peft_config = LoraConfig(
+                r=self.cfg.get("lora_r", 8),
+                lora_alpha=self.cfg.get("lora_alpha", 16),
+                target_modules=["query", "value"],
+                layers_to_transform=list(
+                    range(
+                        model.config.num_hidden_layers - 4,
+                        model.config.num_hidden_layers,
+                    )
+                ),
+                lora_dropout=0.05,
+                bias="none",
+            )
+            model = get_peft_model(model, peft_config)
+
+            for name, p in model.named_parameters():
+                if "LayerNorm" in name or "bias" in name:
+                    p.requires_grad = True
+
+            return model
+
+        s_bert = build_model().train()
+        t_bert = build_model().eval()
+
+        for (s_name, s_p), (t_name, t_p) in zip(
+            s_bert.named_parameters(), t_bert.named_parameters()
+        ):
+            if not s_p.requires_grad:
+                t_p.data = s_p.data  # Shares same weight when requiring grad
+            else:
+                t_p.requires_grad = False
 
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-        return (bert, tokenizer)
-
-    def setup_loss(self) -> tuple[nn.MSELoss, CovarianceLoss, VarianceLoss]:
-        return nn.MSELoss(), CovarianceLoss(), VarianceLoss()
+        return s_bert, t_bert, tokenizer
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         with torch.no_grad():
-            # head
+            # Backbone LoRA
+            for s_p, t_p in zip(self.s_bert.parameters(), self.t_bert.parameters()):
+                if s_p.requires_grad:
+                    t_p.data.mul_(self.ema_decay).add_(
+                        s_p.data, alpha=1.0 - self.ema_decay
+                    )
+
+            # Head
             for s, t in zip(self.s_head.parameters(), self.t_head.parameters()):
                 t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
@@ -128,20 +211,30 @@ class TheSystem(L.LightningModule):
         return sum_embeddings / sum_mask
 
     def configure_optimizers(self):
-        trainable_params = filter(lambda p: p.requires_grad, self.parameters())
-        return torch.optim.AdamW(trainable_params, lr=self.cfg.get("lr", 3e-5))
+        trainable_params = [p for p in self.parameters() if p.requires_grad]
+        optimizer = torch.optim.AdamW(
+            trainable_params, lr=self.cfg.get("lr", 5e-5), weight_decay=0.01
+        )
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=int(self.trainer.estimated_stepping_batches * 0.05),
+            num_training_steps=self.trainer.estimated_stepping_batches,
+        )
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
 
     def validation_step(self, batch, batch_idx):
         pass
 
     def on_validation_start(self):
-        self.bert.eval()
+        self.s_bert.eval()
 
     def on_validation_end(self):
-        self.bert.train()
+        self.s_bert.train()
 
     def on_validation_epoch_end(self):
-        metrics = self.evaluator.eval(self)
+        metrics = {}
+        metrics.update(self.evaluator.eval(self, prefix="head", use_head=True))
+        metrics.update(self.evaluator.eval(self, prefix="backbone", use_head=False))
         self.log_dict(metrics, prog_bar=True, on_epoch=True)
 
     @torch.no_grad()
@@ -153,6 +246,7 @@ class TheSystem(L.LightningModule):
         **kwargs,
     ) -> np.ndarray:
         self.eval()
+        use_head = kwargs.get("use_head", False)
         all_embeddings = []
 
         for i in range(0, len(sentences), batch_size):
@@ -163,9 +257,11 @@ class TheSystem(L.LightningModule):
             )
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            bert_output = self.bert(**inputs).last_hidden_state
-            head_output = self.s_head(bert_output, inputs["attention_mask"])
-            embeddings = self.get_sentence_embedding(head_output, inputs)
+            s_bert_outs = self.s_bert(**inputs)
+            pooled = self.get_sentence_embedding(s_bert_outs, inputs)
+
+            embeddings = self.s_head(pooled) if use_head else pooled
+            embeddings = F.normalize(embeddings, p=2, dim=-1)
 
             all_embeddings.append(embeddings.cpu().numpy())
 

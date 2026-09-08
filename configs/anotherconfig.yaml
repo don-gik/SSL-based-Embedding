@@ -1,4 +1,0 @@
-epochs: 100
-lr: 1e-4
-system_name: "another system"
-repetition: True
