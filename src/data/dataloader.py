@@ -15,6 +15,7 @@ def get_wikitext_sentence_dataloader(
     cache_dir="./.dataset_cache",
     num_workers=16,
     repetition=False,
+    shuffle=False,
 ):
     tokenizer = BertTokenizerFast.from_pretrained(model_name)
     raw_datasets = load_dataset(
@@ -72,10 +73,18 @@ def get_wikitext_sentence_dataloader(
         data_collator = DataCollatorWithPadding(
             tokenizer=tokenizer, return_tensors="pt"
         )
+    elif not shuffle:
+        from src.data.collator import RepetitionShuffleCollator
+
+        data_collator = RepetitionShuffleCollator(
+            tokenizer=tokenizer, rep_prob=0.1, shuffle_prob=0.0
+        )
     else:
         from src.data.collator import RepetitionShuffleCollator
 
-        data_collator = RepetitionShuffleCollator(tokenizer=tokenizer, rep_prob=0.15)
+        data_collator = RepetitionShuffleCollator(
+            tokenizer=tokenizer, rep_prob=0.1, shuffle_prob=0.1
+        )
 
     train_loader = DataLoader(
         processed_datasets["train"],
