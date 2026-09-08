@@ -109,12 +109,12 @@ class TheSystem(L.LightningModule):
                     p.requires_grad = True
 
             peft_config = LoraConfig(
-                r=self.cfg.get("lora_r", 8),
+                r=self.cfg.get("lora_r", 32),
                 lora_alpha=self.cfg.get("lora_alpha", 16),
-                target_modules=["query", "value"],
+                target_modules=["query", "value", "key", "output.dense"],
                 layers_to_transform=list(
                     range(
-                        model.config.num_hidden_layers - 4,
+                        model.config.num_hidden_layers - 8,
                         model.config.num_hidden_layers,
                     )
                 ),
