@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased",
-    batch_size=512,
+    batch_size=256,
     cache_dir="./.dataset_cache",
     num_workers=16,
     repetition=False,
