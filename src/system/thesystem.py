@@ -9,6 +9,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, BertModel, get_cosine_schedule_with_warmup
 
 from src.system.eval import Evaluator
+from src.system.loss import CostDeflatedOTLoss
 
 
 class TheSystem(L.LightningModule):
@@ -39,16 +40,12 @@ class TheSystem(L.LightningModule):
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
         self.center_momentum = cfg.get("center_momentum", 0.95)
 
-        vocab_dict = self.tokenizer.get_vocab()
-        special_tokens = set(self.tokenizer.all_special_tokens)
-
-        self.general_token_ids = torch.tensor(
-            [
-                token_id
-                for token, token_id in vocab_dict.items()
-                if token not in special_tokens
-            ],
-            dtype=torch.long,
+        self.ot_loss_fn = CostDeflatedOTLoss(
+            k=cfg.get("ot_k", 5),
+            lambda_penalty=cfg.get("ot_lambda", 1.0),
+            tau=cfg.get("ot_tau", 0.07),
+            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.05),
+            sinkhorn_iters=cfg.get("sinkhorn_iters", 5),
         )
 
         self.evaluator = Evaluator()
@@ -81,8 +78,8 @@ class TheSystem(L.LightningModule):
 
         p_embed = self.predictor(s_embed)
 
-        target = torch.ones(p_embed.size(0), device=p_embed.device)
-        loss = F.cosine_embedding_loss(p_embed, t_embed, target)
+        # target = torch.ones(p_embed.size(0), device=p_embed.device)
+        loss = self.ot_loss_fn(p_embed, t_embed)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -96,8 +93,8 @@ class TheSystem(L.LightningModule):
             model = BertModel.from_pretrained(
                 model_name,
                 attn_implementation=attn_mode,
-                hidden_dropout_prob=0.15,
-                attention_probs_dropout_prob=0.15,
+                hidden_dropout_prob=0.1,
+                attention_probs_dropout_prob=0.1,
                 output_hidden_states=True,
             )
 

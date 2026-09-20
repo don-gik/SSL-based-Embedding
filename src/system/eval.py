@@ -74,7 +74,6 @@ class Evaluator:
         # -------------------------------------------------------------
         centered = all_emb - all_emb.mean(dim=0, keepdim=True)
 
-        # GPU SVD 분해
         _, S, _ = torch.linalg.svd(centered, full_matrices=False)
         S_sum = S.sum() + 1e-8
 

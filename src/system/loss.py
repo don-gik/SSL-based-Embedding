@@ -82,3 +82,82 @@ class LogVarianceLoss(nn.Module):
         diff = torch.relu(self.log_target_std - log_std_z)
         var_loss = torch.mean(diff**2)
         return var_loss
+
+
+class CostDeflatedOTLoss(nn.Module):
+    """Cost-Deflated Optimal Transport (Sinkhorn) Loss.
+
+    Suppresses the top-k principal directions in feature space to force the network
+    to utilize tail dimensions, maximizing effective rank without SVD gradient instability.
+    """
+
+    def __init__(
+        self,
+        k: int = 5,
+        lambda_penalty: float = 1.0,
+        tau: float = 0.07,
+        sinkhorn_eps: float = 0.05,
+        sinkhorn_iters: int = 5,
+        power_iters: int = 5,
+    ):
+        super().__init__()
+        self.k = k
+        self.lambda_penalty = lambda_penalty
+        self.tau = tau
+        self.sinkhorn_eps = sinkhorn_eps
+        self.sinkhorn_iters = sinkhorn_iters
+        self.power_iters = power_iters
+
+    @torch.no_grad()
+    def _get_top_k_vectors(self, M: torch.Tensor) -> torch.Tensor:
+        """Extracts top-k principal feature directions V_k (D, k) from Teacher embeddings via Power Iteration."""
+        _, d = M.shape
+        V = torch.randn(d, self.k, device=M.device, dtype=M.dtype)
+        V = F.normalize(V, dim=0)
+
+        for _ in range(self.power_iters):
+            V = M.T @ (M @ V)
+            V = F.normalize(V, dim=0)
+        return V
+
+    @torch.no_grad()
+    def _sinkhorn_knopp(self, C: torch.Tensor) -> torch.Tensor:
+        """Computes doubly stochastic target matrix Q from deflated cost matrix C."""
+        K = torch.exp(-C / self.sinkhorn_eps)
+        u = torch.ones(C.size(0), 1, device=C.device, dtype=C.dtype) / C.size(0)
+        v = torch.ones(C.size(1), 1, device=C.device, dtype=C.dtype) / C.size(1)
+
+        for _ in range(self.sinkhorn_iters):
+            u = 1.0 / (K @ v + 1e-8)
+            v = 1.0 / (K.T @ u + 1e-8)
+
+        Q = u * K * v.T
+        return Q / (Q.sum() + 1e-8)
+
+    def forward(self, z_student: torch.Tensor, z_teacher: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            z_student (torch.Tensor): Predictor/Student embeddings [B, D]
+            z_teacher (torch.Tensor): Teacher/Target embeddings [B, D]
+        """
+        # 1. Mean-Centering & L2 Normalization (Anisotropy prevention)
+        z_s = F.normalize(z_student - z_student.mean(dim=0, keepdim=True), dim=-1)
+        z_t = F.normalize(z_teacher - z_teacher.mean(dim=0, keepdim=True), dim=-1)
+
+        # 2. Similarity Matrix
+        S = z_s @ z_t.T  # [B, B]
+
+        # 3. Top-k Deflation via Teacher V_k
+        V_k = self._get_top_k_vectors(z_t)  # [D, k]
+        P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
+
+        # 4. Deflated Cost Matrix & Doubly Stochastic Target Q
+        C_deflated = -S + self.lambda_penalty * P_k
+        Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
+
+        # 5. Cross-Entropy Loss against Soft Target Q
+        P_logits = S / self.tau
+        log_probs = F.log_softmax(P_logits, dim=-1)
+
+        loss = -torch.sum(Q * log_probs, dim=-1).mean()
+        return loss
