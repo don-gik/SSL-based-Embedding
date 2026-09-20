@@ -132,7 +132,7 @@ class CostDeflatedOTLoss(nn.Module):
             v = 1.0 / (K.T @ u + 1e-8)
 
         Q = u * K * v.T
-        return Q / (Q.sum() + 1e-8)
+        return Q
 
     def forward(self, z_student: torch.Tensor, z_teacher: torch.Tensor) -> torch.Tensor:
         """

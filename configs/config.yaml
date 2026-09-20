@@ -1,4 +1,4 @@
-epochs: 1
+epochs: 50
 lr: 1e-4
 system_name: "the system"
 repetition: False

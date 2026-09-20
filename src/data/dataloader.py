@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def get_wikitext_sentence_dataloader(
     model_name="bert-base-uncased",
-    batch_size=128,
+    batch_size=512,
     cache_dir="./.dataset_cache",
     num_workers=16,
     repetition=False,
@@ -68,10 +68,10 @@ def get_wikitext_sentence_dataloader(
     processed_datasets.set_format(type="torch", columns=["input_ids", "attention_mask"])
 
     if not repetition:
-        from transformers import DataCollatorWithPadding
+        from src.data.collator import RepetitionShuffleCollator
 
-        data_collator = DataCollatorWithPadding(
-            tokenizer=tokenizer, return_tensors="pt"
+        data_collator = RepetitionShuffleCollator(
+            tokenizer=tokenizer, rep_prob=0.0, shuffle_prob=0.0
         )
     elif not shuffle:
         from src.data.collator import RepetitionShuffleCollator
