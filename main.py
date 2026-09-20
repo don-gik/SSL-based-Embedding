@@ -76,6 +76,7 @@ def main(cfg: DictConfig):
             accelerator="auto",
             val_check_interval=250,
             check_val_every_n_epoch=None,
+            save_top_k=1,
         )
         trainer.fit(
             model=system,
