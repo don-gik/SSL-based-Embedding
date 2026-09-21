@@ -60,8 +60,8 @@ class CostDeflatedOTLoss(nn.Module):
             z_teacher (torch.Tensor): Teacher/Target embeddings [B, D]
         """
         # L2 Norm
-        z_s = F.normalize(z_student, dim=-1)
-        z_t = F.normalize(z_teacher, dim=-1)
+        z_s = F.normalize(z_student - z_student.mean(dim=0, keepdim=True), dim=-1)
+        z_t = F.normalize(z_teacher - z_teacher.mean(dim=0, keepdim=True), dim=-1)
 
         # Similarity Matrix
         S = z_s @ z_t.T  # [B, B]
