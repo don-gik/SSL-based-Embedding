@@ -75,11 +75,11 @@ class TheSystem(L.LightningModule):
                 t_outs, {"attention_mask": batch["t_attention_mask"]}
             )
 
-            batch_center = t_embed.mean(dim=0, keepdim=True)
-            self.t_center = self.t_center * self.center_momentum + batch_center * (
-                1.0 - self.center_momentum
-            )
-            t_embed = t_embed - self.t_center
+            # batch_center = t_embed.mean(dim=0, keepdim=True)
+            # self.t_center = self.t_center * self.center_momentum + batch_center * (
+            #     1.0 - self.center_momentum
+            # )
+            # t_embed = t_embed - self.t_center
 
         # p_embed = self.predictor(s_embed)
 
