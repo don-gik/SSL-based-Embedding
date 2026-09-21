@@ -165,9 +165,9 @@ class TheSystem(L.LightningModule):
                         s_p.data, alpha=1.0 - self.ema_decay
                     )
 
-            # Head
-            for s, t in zip(self.s_head.parameters(), self.t_head.parameters()):
-                t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
+            # # Head
+            # for s, t in zip(self.s_head.parameters(), self.t_head.parameters()):
+            #     t.data.mul_(self.ema_decay).add_(s.data, alpha=1.0 - self.ema_decay)
 
     def get_sentence_embedding(self, outputs, batch):
         if hasattr(outputs, "last_hidden_state"):
@@ -189,7 +189,7 @@ class TheSystem(L.LightningModule):
     def configure_optimizers(self):
         trainable_params = [p for p in self.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(
-            trainable_params, lr=self.cfg.get("lr", 5e-5), weight_decay=0.01
+            trainable_params, lr=self.cfg.get("lr", 5e-5), weight_decay=0.05
         )
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
@@ -209,8 +209,8 @@ class TheSystem(L.LightningModule):
 
     def on_validation_epoch_end(self):
         metrics = {}
-        metrics.update(self.evaluator.eval(self, prefix="head", use_head=True))
-        metrics.update(self.evaluator.eval(self, prefix="backbone", use_head=False))
+        # metrics.update(self.evaluator.eval(self, prefix="head", use_head=True))
+        metrics.update(self.evaluator.eval(self, prefix="backbone"))
         self.log_dict(metrics, prog_bar=True, on_epoch=True)
 
     @torch.no_grad()
@@ -223,7 +223,7 @@ class TheSystem(L.LightningModule):
         **kwargs,
     ) -> torch.Tensor | np.ndarray:
         self.eval()
-        use_head = kwargs.get("use_head", False)
+        # use_head = kwargs.get("use_head", False)
         all_embeddings = []
 
         iterator = range(0, len(sentences), batch_size)
@@ -239,9 +239,8 @@ class TheSystem(L.LightningModule):
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
             s_bert_outs = self.s_bert(**inputs)
-            pooled = self.get_sentence_embedding(s_bert_outs, inputs)
+            embeddings = self.get_sentence_embedding(s_bert_outs, inputs)
 
-            embeddings = self.s_head(pooled) if use_head else pooled
             embeddings = F.normalize(embeddings, p=2, dim=-1)
 
             all_embeddings.append(embeddings)
