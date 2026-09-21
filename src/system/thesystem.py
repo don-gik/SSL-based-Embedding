@@ -42,9 +42,9 @@ class TheSystem(L.LightningModule):
 
         self.ot_loss_fn = CostDeflatedOTLoss(
             k=cfg.get("ot_k", 3),
-            lambda_penalty=cfg.get("ot_lambda", 0.2),
+            lambda_penalty=cfg.get("ot_lambda", 0.5),
             tau=cfg.get("ot_tau", 0.07),
-            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.05),
+            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.1),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 5),
         )
 

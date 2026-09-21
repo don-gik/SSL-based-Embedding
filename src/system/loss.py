@@ -147,13 +147,16 @@ class CostDeflatedOTLoss(nn.Module):
         # 2. Similarity Matrix
         S = z_s @ z_t.T  # [B, B]
 
-        # 3. Top-k Deflation via Teacher V_k
-        V_k = self._get_top_k_vectors(z_t)  # [D, k]
-        P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
+        with torch.no_grad():
+            V_k = self._get_top_k_vectors(z_t)  # [D, k]
+            P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
+            P_k.fill_diagonal_(0.0)  # Fill diagonal
 
-        # 4. Deflated Cost Matrix & Doubly Stochastic Target Q
-        C_deflated = -S + self.lambda_penalty * P_k
-        Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
+            # Cosine Distance (0.0 - 1.0) + Off-diagonal Deflation Penalty
+            C_deflated = (1.0 - S) + self.lambda_penalty * P_k
+            C_deflated.clamp_min_(0.0)
+
+            Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
 
         # 5. Cross-Entropy Loss against Soft Target Q
         P_logits = S / self.tau
