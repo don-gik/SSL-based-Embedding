@@ -69,14 +69,14 @@ class CostDeflatedOTLoss(nn.Module):
         z_t_cent = z_t - z_t.mean(dim=0, keepdim=True)
 
         # Similarity Matrix
-        S = z_s @ z_t.T  # [B, B]
+        S_cent = z_s_cent @ z_t_cent.T  # [B, B]
 
         # Top-k Deflation via Teacher V_k
         V_k = self._get_top_k_vectors(z_t_cent)  # [D, k]
         P_k = (z_s_cent @ V_k) @ (z_t_cent @ V_k).T  # [B, B]
 
         # Deflated Cost Matrix & Doubly Stochastic Target Q
-        C_deflated = -S + self.lambda_penalty * P_k
+        C_deflated = -S_cent + self.lambda_penalty * P_k
         Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
         Q = Q.detach()
 
