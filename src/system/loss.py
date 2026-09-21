@@ -60,22 +60,28 @@ class CostDeflatedOTLoss(nn.Module):
             z_teacher (torch.Tensor): Teacher/Target embeddings [B, D]
         """
         # L2 Norm
-        z_s = F.normalize(z_student - z_student.mean(dim=0, keepdim=True), dim=-1)
-        z_t = F.normalize(z_teacher - z_teacher.mean(dim=0, keepdim=True), dim=-1)
+        z_s = F.normalize(z_student, dim=-1)
+        z_t = F.normalize(z_teacher, dim=-1)
+
+        z_s_cent = z_s - z_s.mean(dim=0, keepdim=True)
+        z_t_cent = z_t - z_t.mean(dim=0, keepdim=True)
 
         # Similarity Matrix
         S = z_s @ z_t.T  # [B, B]
 
         # Top-k Deflation via Teacher V_k
-        V_k = self._get_top_k_vectors(z_t)  # [D, k]
-        P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
+        V_k = self._get_top_k_vectors(z_t_cent)  # [D, k]
+        P_k = (z_s_cent @ V_k) @ (z_t_cent @ V_k).T  # [B, B]
 
         # Deflated Cost Matrix & Doubly Stochastic Target Q
         C_deflated = -S + self.lambda_penalty * P_k
         Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
+        Q = Q.detach()
+
+        S_original = z_s @ z_t.T
 
         # Cross-Entropy Loss against Soft Target Q
-        P_logits = S / self.tau
+        P_logits = S_original / self.tau
         log_probs = F.log_softmax(P_logits, dim=-1)
 
         loss = -torch.sum(Q * log_probs, dim=-1).mean()
