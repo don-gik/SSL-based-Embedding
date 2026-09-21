@@ -6,7 +6,7 @@ from scipy.stats import pearsonr, spearmanr
 
 
 class Evaluator:
-    def __init__(self, high_score_threshold: float = 4.0):
+    def __init__(self, high_score_threshold: float = 0.8):
         self.stsb_data = load_dataset("sentence-transformers/stsb", split="validation")
         self.sentences1 = self.stsb_data["sentence1"]
         self.sentences2 = self.stsb_data["sentence2"]
