@@ -113,11 +113,11 @@ class CostDeflatedOTLoss(nn.Module):
         """Extracts top-k principal feature directions V_k (D, k) from Teacher embeddings via Power Iteration."""
         _, d = M.shape
         V = torch.randn(d, self.k, device=M.device, dtype=M.dtype)
-        V = F.normalize(V, dim=0)
+        V, _ = torch.linalg.qr(V)
 
         for _ in range(self.power_iters):
             V = M.T @ (M @ V)
-            V = F.normalize(V, dim=0)
+            V, _ = torch.linalg.qr(V)
         return V
 
     @torch.no_grad()

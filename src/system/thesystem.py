@@ -10,7 +10,6 @@ from transformers import AutoTokenizer, BertModel, get_cosine_schedule_with_warm
 
 from src.system.eval import Evaluator
 from src.system.loss import CostDeflatedOTLoss
-from src.system.update import GrokfastEMA
 
 
 class TheSystem(L.LightningModule):
@@ -49,12 +48,12 @@ class TheSystem(L.LightningModule):
             sinkhorn_iters=cfg.get("sinkhorn_iters", 5),
         )
 
-        self.grokfast = GrokfastEMA()
+        # self.grokfast = GrokfastEMA()
 
         self.evaluator = Evaluator()
 
-    def on_before_optimizer_step(self, optimizer):
-        self.grokfast.apply(self)
+    # def on_before_optimizer_step(self, optimizer):
+    #     self.grokfast.apply(self)
 
     def training_step(self, batch, batch_idx):
         # Students
