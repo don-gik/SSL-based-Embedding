@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
         dummy_loader = DataLoader(dummy_ds, batch_size=1)
 
         checkpoint_callback = ModelCheckpoint(
-            monitor="eval/backbone_spearman",
+            monitor="eval/backbone/spearman",
             mode="max",
             save_top_k=1,
             filename="best-model-{epoch:02d}-{step}",
