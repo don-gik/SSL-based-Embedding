@@ -1,7 +1,6 @@
 import lightning as L
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from peft import LoraConfig, get_peft_model
@@ -21,22 +20,24 @@ class TheSystem(L.LightningModule):
         self.cfg = cfg
         self.ema_decay = cfg.get("ema_decay", 0.996)
 
-        self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(device_info)
+        self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(
+            device_info, use_lora=True
+        )
 
         hidden_dim = self.s_bert.config.hidden_size
 
-        def build_mlp(hidden_dim):
-            return nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.GELU(),
-                nn.Dropout(self.s_bert.config.hidden_dropout_prob),
-                nn.Linear(hidden_dim, hidden_dim),
-            )
+        # def build_mlp(hidden_dim):
+        #     return nn.Sequential(
+        #         nn.Linear(hidden_dim, hidden_dim),
+        #         nn.LayerNorm(hidden_dim),
+        #         nn.GELU(),
+        #         nn.Dropout(self.s_bert.config.hidden_dropout_prob),
+        #         nn.Linear(hidden_dim, hidden_dim),
+        #     )
 
-        self.s_head = build_mlp(hidden_dim).train()
-        self.t_head = build_mlp(hidden_dim).eval()
-        self.predictor = build_mlp(hidden_dim).train()
+        # self.s_head = build_mlp(hidden_dim).train()
+        # self.t_head = build_mlp(hidden_dim).eval()
+        # self.predictor = build_mlp(hidden_dim).train()
 
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
         self.center_momentum = cfg.get("center_momentum", 0.95)
@@ -44,8 +45,8 @@ class TheSystem(L.LightningModule):
         self.ot_loss_fn = CostDeflatedOTLoss(
             k=cfg.get("ot_k", 1),
             lambda_penalty=cfg.get("ot_lambda", 1.0),
-            tau=cfg.get("ot_tau", 0.07),
-            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.05),
+            tau=cfg.get("ot_tau", 0.1),
+            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.1),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 10),
         )
 
@@ -61,20 +62,18 @@ class TheSystem(L.LightningModule):
         s_outs = self.s_bert(
             input_ids=batch["s_input_ids"], attention_mask=batch["s_attention_mask"]
         )
-        s_pooled = self.get_sentence_embedding(
+        s_embed = self.get_sentence_embedding(
             s_outs, {"attention_mask": batch["s_attention_mask"]}
         )
-        s_embed = self.s_head(s_pooled)  # [B, D]
 
         # Teacher
         with torch.no_grad():
             t_outs = self.t_bert(
                 input_ids=batch["t_input_ids"], attention_mask=batch["t_attention_mask"]
             )
-            t_pooled = self.get_sentence_embedding(
+            t_embed = self.get_sentence_embedding(
                 t_outs, {"attention_mask": batch["t_attention_mask"]}
             )
-            t_embed = self.t_head(t_pooled)  # [B, D]
 
             batch_center = t_embed.mean(dim=0, keepdim=True)
             self.t_center = self.t_center * self.center_momentum + batch_center * (
@@ -82,10 +81,10 @@ class TheSystem(L.LightningModule):
             )
             t_embed = t_embed - self.t_center
 
-        p_embed = self.predictor(s_embed)
+        # p_embed = self.predictor(s_embed)
 
-        # target = torch.ones(p_embed.size(0), device=p_embed.device)
-        loss = self.ot_loss_fn(p_embed, t_embed)
+        # target = torch.ones(s_embed.size(0), device=p_embed.device)
+        loss = self.ot_loss_fn(s_embed, t_embed)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
