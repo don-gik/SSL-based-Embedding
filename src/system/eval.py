@@ -13,6 +13,11 @@ class Evaluator:
         self.gold_scores = np.array(self.stsb_data["score"])
         self.high_score_threshold = high_score_threshold
 
+        self.test_data = load_dataset("sentence-transformers/stsb", split="test")
+        self.test_sentences1 = self.test_data["sentence1"]
+        self.test_sentences2 = self.test_data["sentence2"]
+        self.test_gold_scores = np.array(self.test_data["score"])
+
     @torch.no_grad()
     def eval(self, system, prefix: str | None = None, **kwargs) -> dict[str, float]:
         prefix_str = f"{prefix}/" if prefix else ""
@@ -39,6 +44,33 @@ class Evaluator:
         # Spearman & Pearson
         spearman_score, _ = spearmanr(self.gold_scores, cosine_similarities)
         pearson_score, _ = pearsonr(self.gold_scores, cosine_similarities)
+
+        # -------------------------------------------------------------
+        # Test Set Evaluation
+        # -------------------------------------------------------------
+        test_emb1 = system.encode(self.test_sentences1, **kwargs)
+        test_emb2 = system.encode(self.test_sentences2, **kwargs)
+
+        if isinstance(test_emb1, np.ndarray):
+            test_emb1 = torch.from_numpy(test_emb1)
+        if isinstance(test_emb2, np.ndarray):
+            test_emb2 = torch.from_numpy(test_emb2)
+
+        test_emb1 = test_emb1.to(device)
+        test_emb2 = test_emb2.to(device)
+
+        test_emb1_norm = F.normalize(test_emb1, p=2, dim=-1)
+        test_emb2_norm = F.normalize(test_emb2, p=2, dim=-1)
+        test_cosine_similarities = (
+            (test_emb1_norm * test_emb2_norm).sum(dim=-1).cpu().numpy()
+        )
+
+        test_spearman_score, _ = spearmanr(
+            self.test_gold_scores, test_cosine_similarities
+        )
+        test_pearson_score, _ = pearsonr(
+            self.test_gold_scores, test_cosine_similarities
+        )
 
         # -------------------------------------------------------------
         # 2. Alignment (GPU)
@@ -106,6 +138,8 @@ class Evaluator:
             # Performance
             f"eval/{prefix_str}spearman": float(spearman_score),
             f"eval/{prefix_str}pearson": float(pearson_score),
+            f"eval/{prefix_str}test_spearman": float(test_spearman_score),
+            f"eval/{prefix_str}test_pearson": float(test_pearson_score),
             # Representation Space
             f"repr/{prefix_str}alignment": alignment,
             f"repr/{prefix_str}uniformity": uniformity,
