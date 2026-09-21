@@ -14,7 +14,7 @@ import hydra
 import lightning as L
 import nltk
 import torch
-from lightning.pytorch.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader, TensorDataset
@@ -54,6 +54,14 @@ def main(cfg: DictConfig):
         dummy_ds = TensorDataset(torch.zeros(1))
         dummy_loader = DataLoader(dummy_ds, batch_size=1)
 
+        checkpoint_callback = ModelCheckpoint(
+            monitor="eval/backbone_spearman",
+            mode="max",
+            save_top_k=1,
+            filename="best-model-{epoch:02d}-{step}",
+            save_weights_only=True,
+        )
+
         tensorboardlogger = TensorBoardLogger(
             "tb_logs", name=cfg.get("system_name", default_value="SimCSE_Noise")
         )
@@ -72,11 +80,10 @@ def main(cfg: DictConfig):
         trainer = L.Trainer(
             logger=tensorboardlogger,
             max_epochs=cfg.epochs,
-            callbacks=[lr_callback],
+            callbacks=[lr_callback, checkpoint_callback],
             accelerator="auto",
             val_check_interval=250,
             check_val_every_n_epoch=None,
-            save_top_k=1,
         )
         trainer.fit(
             model=system,

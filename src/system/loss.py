@@ -94,7 +94,7 @@ class CostDeflatedOTLoss(nn.Module):
     def __init__(
         self,
         k: int = 5,
-        lambda_penalty: float = 1.0,
+        lambda_penalty: float = 0.5,
         tau: float = 0.07,
         sinkhorn_eps: float = 0.05,
         sinkhorn_iters: int = 5,

@@ -42,13 +42,16 @@ class TheSystem(L.LightningModule):
 
         self.ot_loss_fn = CostDeflatedOTLoss(
             k=cfg.get("ot_k", 5),
-            lambda_penalty=cfg.get("ot_lambda", 1.0),
+            lambda_penalty=cfg.get("ot_lambda", 0.5),
             tau=cfg.get("ot_tau", 0.07),
             sinkhorn_eps=cfg.get("sinkhorn_eps", 0.05),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 5),
         )
 
         self.evaluator = Evaluator()
+
+    def on_before_optimizer_step(self, optimizer):
+        self.grokfast.apply(self)
 
     def training_step(self, batch, batch_idx):
         # Students
@@ -84,7 +87,9 @@ class TheSystem(L.LightningModule):
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
-    def setup_bert(self, device_info) -> tuple[BertModel, AutoTokenizer]:
+    def setup_bert(
+        self, device_info, use_lora: bool = False
+    ) -> tuple[BertModel, AutoTokenizer]:
         accelerator, _, _, _ = device_info
         attn_mode = "sdpa" if accelerator == "gpu" else "eager"
         model_name = self.cfg.get("model_name", "bert-base-uncased")
@@ -98,30 +103,36 @@ class TheSystem(L.LightningModule):
                 output_hidden_states=True,
             )
 
-            for p in model.parameters():
-                p.requires_grad = False
+            if use_lora:
+                # --- LoRA ---
+                for p in model.parameters():
+                    p.requires_grad = False
 
-            for name, p in model.named_parameters():
-                if "LayerNorm" in name or "bias" in name:
-                    p.requires_grad = True
+                for name, p in model.named_parameters():
+                    if "LayerNorm" in name or "bias" in name:
+                        p.requires_grad = True
 
-            peft_config = LoraConfig(
-                r=self.cfg.get("lora_r", 16),
-                lora_alpha=self.cfg.get("lora_alpha", 16),
-                target_modules=["query", "value"],
-                layers_to_transform=list(
-                    range(
-                        model.config.num_hidden_layers - 8,
-                        model.config.num_hidden_layers,
-                    )
-                ),
-                lora_dropout=0.05,
-                bias="none",
-            )
-            model = get_peft_model(model, peft_config)
+                peft_config = LoraConfig(
+                    r=self.cfg.get("lora_r", 16),
+                    lora_alpha=self.cfg.get("lora_alpha", 16),
+                    target_modules=["query", "value"],
+                    layers_to_transform=list(
+                        range(
+                            model.config.num_hidden_layers - 8,
+                            model.config.num_hidden_layers,
+                        )
+                    ),
+                    lora_dropout=0.05,
+                    bias="none",
+                )
+                model = get_peft_model(model, peft_config)
 
-            for name, p in model.named_parameters():
-                if "LayerNorm" in name or "bias" in name:
+                for name, p in model.named_parameters():
+                    if "LayerNorm" in name or "bias" in name:
+                        p.requires_grad = True
+            else:
+                # --- FFT (Full Fine-Tuning) ---
+                for p in model.parameters():
                     p.requires_grad = True
 
             return model
@@ -135,7 +146,9 @@ class TheSystem(L.LightningModule):
             if not s_p.requires_grad:
                 t_p.data = s_p.data  # Shares same weight when requiring grad
             else:
-                t_p.requires_grad = False
+                t_p.data = s_p.data.clone()
+
+            t_p.requires_grad = False
 
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
