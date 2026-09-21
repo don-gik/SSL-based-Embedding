@@ -93,12 +93,12 @@ class CostDeflatedOTLoss(nn.Module):
 
     def __init__(
         self,
-        k: int = 5,
+        k: int = 1,
         lambda_penalty: float = 1.0,
-        tau: float = 0.07,
-        sinkhorn_eps: float = 0.05,
-        sinkhorn_iters: int = 5,
-        power_iters: int = 5,
+        tau: float = 0.1,
+        sinkhorn_eps: float = 0.1,
+        sinkhorn_iters: int = 10,
+        power_iters: int = 7,
     ):
         super().__init__()
         self.k = k
