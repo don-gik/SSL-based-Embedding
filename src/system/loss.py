@@ -59,6 +59,8 @@ class CostDeflatedOTLoss(nn.Module):
             z_student (torch.Tensor): Predictor/Student embeddings [B, D]
             z_teacher (torch.Tensor): Teacher/Target embeddings [B, D]
         """
+        z_teacher = z_teacher.detach()
+
         # L2 Norm
         z_s = F.normalize(z_student, dim=-1)
         z_t = F.normalize(z_teacher, dim=-1)
