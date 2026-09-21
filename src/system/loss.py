@@ -94,7 +94,7 @@ class CostDeflatedOTLoss(nn.Module):
     def __init__(
         self,
         k: int = 5,
-        lambda_penalty: float = 0.5,
+        lambda_penalty: float = 1.0,
         tau: float = 0.07,
         sinkhorn_eps: float = 0.05,
         sinkhorn_iters: int = 5,
@@ -124,8 +124,8 @@ class CostDeflatedOTLoss(nn.Module):
     def _sinkhorn_knopp(self, C: torch.Tensor) -> torch.Tensor:
         """Computes doubly stochastic target matrix Q from deflated cost matrix C."""
         K = torch.exp(-C / self.sinkhorn_eps)
-        u = torch.ones(C.size(0), 1, device=C.device, dtype=C.dtype) / C.size(0)
-        v = torch.ones(C.size(1), 1, device=C.device, dtype=C.dtype) / C.size(1)
+        u = torch.ones(C.size(0), 1, device=C.device, dtype=C.dtype)
+        v = torch.ones(C.size(1), 1, device=C.device, dtype=C.dtype)
 
         for _ in range(self.sinkhorn_iters):
             u = 1.0 / (K @ v + 1e-8)
@@ -140,25 +140,22 @@ class CostDeflatedOTLoss(nn.Module):
             z_student (torch.Tensor): Predictor/Student embeddings [B, D]
             z_teacher (torch.Tensor): Teacher/Target embeddings [B, D]
         """
-        # 1. Mean-Centering & L2 Normalization (Anisotropy prevention)
-        z_s = F.normalize(z_student - z_student.mean(dim=0, keepdim=True), dim=-1)
-        z_t = F.normalize(z_teacher - z_teacher.mean(dim=0, keepdim=True), dim=-1)
+        # L2 Norm
+        z_s = F.normalize(z_student, dim=-1)
+        z_t = F.normalize(z_teacher, dim=-1)
 
-        # 2. Similarity Matrix
+        # Similarity Matrix
         S = z_s @ z_t.T  # [B, B]
 
-        with torch.no_grad():
-            V_k = self._get_top_k_vectors(z_t)  # [D, k]
-            P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
-            P_k.fill_diagonal_(0.0)  # Fill diagonal
+        # Top-k Deflation via Teacher V_k
+        V_k = self._get_top_k_vectors(z_t)  # [D, k]
+        P_k = (z_s @ V_k) @ (z_t @ V_k).T  # [B, B]
 
-            # Cosine Distance (0.0 - 1.0) + Off-diagonal Deflation Penalty
-            C_deflated = (1.0 - S) + self.lambda_penalty * P_k
-            C_deflated.clamp_min_(0.0)
+        # Deflated Cost Matrix & Doubly Stochastic Target Q
+        C_deflated = -S + self.lambda_penalty * P_k
+        Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
 
-            Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
-
-        # 5. Cross-Entropy Loss against Soft Target Q
+        # Cross-Entropy Loss against Soft Target Q
         P_logits = S / self.tau
         log_probs = F.log_softmax(P_logits, dim=-1)
 
