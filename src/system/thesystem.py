@@ -18,7 +18,7 @@ class TheSystem(L.LightningModule):
         self.save_hyperparameters(ignore=["cfg", "tokenizer", "evaluator"])
 
         self.cfg = cfg
-        self.ema_decay = cfg.get("ema_decay", 0.996)
+        self.ema_decay = cfg.get("ema_decay", 0.99)
 
         self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(
             device_info, use_lora=True
@@ -39,15 +39,14 @@ class TheSystem(L.LightningModule):
         # self.t_head = build_mlp(hidden_dim).eval()
         # self.predictor = build_mlp(hidden_dim).train()
 
-        self.register_buffer("t_center", torch.zeros(1, hidden_dim))
-        self.center_momentum = cfg.get("center_momentum", 0.95)
-
         self.ot_loss_fn = CostDeflatedOTLoss(
+            hidden_dim=hidden_dim,
             k=cfg.get("ot_k", 3),
-            lambda_penalty=cfg.get("ot_lambda", 0.5),
-            tau=cfg.get("ot_tau", 0.07),
-            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.05),
+            lambda_penalty=cfg.get("lambda", 0.5),
+            tau=cfg.get("tau", 0.1),
+            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.1),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 10),
+            center_momentum=cfg.get("center_momentum", 0.9),
         )
 
         self.grokfast = GrokfastEMA()
@@ -118,12 +117,12 @@ class TheSystem(L.LightningModule):
                     r=self.cfg.get("lora_r", 16),
                     lora_alpha=self.cfg.get("lora_alpha", 16),
                     target_modules=["query", "value"],
-                    layers_to_transform=list(
+                    layers_to_transform=[
                         range(
                             model.config.num_hidden_layers - 8,
                             model.config.num_hidden_layers,
                         )
-                    ),
+                    ],
                     lora_dropout=0.05,
                     bias="none",
                 )

@@ -12,12 +12,14 @@ class CostDeflatedOTLoss(nn.Module):
 
     def __init__(
         self,
+        hidden_dim: int,
         k: int = 1,
         lambda_penalty: float = 1.0,
         tau: float = 0.1,
         sinkhorn_eps: float = 0.1,
         sinkhorn_iters: int = 10,
         power_iters: int = 7,
+        center_momentum: float = 0.9,
     ):
         super().__init__()
         self.k = k
@@ -26,6 +28,9 @@ class CostDeflatedOTLoss(nn.Module):
         self.sinkhorn_eps = sinkhorn_eps
         self.sinkhorn_iters = sinkhorn_iters
         self.power_iters = power_iters
+
+        self.register_buffer("t_center", torch.zeros(1, hidden_dim))
+        self.center_momentum = center_momentum
 
     @torch.no_grad()
     def _get_top_k_vectors(self, M: torch.Tensor) -> torch.Tensor:
@@ -40,17 +45,19 @@ class CostDeflatedOTLoss(nn.Module):
         return V
 
     @torch.no_grad()
-    def _sinkhorn_knopp(self, C: torch.Tensor) -> torch.Tensor:
-        """Computes doubly stochastic target matrix Q from deflated cost matrix C."""
+    def _unbalanced_sinkhorn(self, C: torch.Tensor) -> torch.Tensor:
+        """Unbalanced Sinkhorn-Knopp Algorithm (Chizat et al., 2018)"""
         K = torch.exp(-C / self.sinkhorn_eps)
         u = torch.ones(C.size(0), 1, device=C.device, dtype=C.dtype)
         v = torch.ones(C.size(1), 1, device=C.device, dtype=C.dtype)
 
         for _ in range(self.sinkhorn_iters):
-            u = 1.0 / (K @ v + 1e-8)
-            v = 1.0 / (K.T @ u + 1e-8)
+            u = (1.0 / (K @ v + 1e-8)) ** self.gamma
+            v = (1.0 / (K.T @ u + 1e-8)) ** self.gamma
 
         Q = u * K * v.T
+
+        Q = Q / (Q.sum() + 1e-8) * C.size(0)
         return Q
 
     def forward(self, z_student: torch.Tensor, z_teacher: torch.Tensor) -> torch.Tensor:
@@ -66,23 +73,24 @@ class CostDeflatedOTLoss(nn.Module):
         z_t = F.normalize(z_teacher, dim=-1)
 
         z_s_cent = z_s - z_s.mean(dim=0, keepdim=True)
-        z_t_cent = z_t - z_t.mean(dim=0, keepdim=True)
 
         # Similarity Matrix
-        S_cent = z_s_cent @ z_t_cent.T  # [B, B]
-
-        # Top-k Deflation via Teacher V_k
-        V_k = self._get_top_k_vectors(z_t_cent)  # [D, k]
-        P_k = (z_s_cent @ V_k) @ (z_t_cent @ V_k).T  # [B, B]
-
-        # Deflated Cost Matrix & Doubly Stochastic Target Q
-        C_deflated = -S_cent + self.lambda_penalty * P_k
-        Q = self._sinkhorn_knopp(C_deflated)  # [B, B]
-        Q = Q.detach()
-
+        S_cent = z_s_cent @ z_t.T  # [B, B]
         S_original = z_s @ z_t.T
 
-        # Cross-Entropy Loss against Soft Target Q
+        with torch.no_grad():
+            # 4. Top-k Projection
+            V_k = self._get_top_k_vectors(z_t)
+            P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
+
+            # 5. Mahalanobis Cost
+            S_mahalanobis = S_cent - self.alpha * P_k
+            C_mahalanobis = 1.0 - S_mahalanobis
+
+            # 6. Unbalanced Sinkhorn Target Q
+            Q = self._unbalanced_sinkhorn(C_mahalanobis)
+
+        # 7. Cross-Entropy Loss against Soft Target Q
         P_logits = S_original / self.tau
         log_probs = F.log_softmax(P_logits, dim=-1)
 
