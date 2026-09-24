@@ -13,18 +13,18 @@ class CostDeflatedOTLoss(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
-        k: int = 1,
-        lambda_penalty: float = 1.0,
+        k: int = 3,
+        alpha: float = 0.15,
         tau: float = 0.1,
         gamma: float = 0.9,
-        sinkhorn_eps: float = 0.1,
+        sinkhorn_eps: float = 0.15,
         sinkhorn_iters: int = 10,
         power_iters: int = 7,
         center_momentum: float = 0.9,
     ):
         super().__init__()
         self.k = k
-        self.lambda_penalty = lambda_penalty
+        self.alpha = alpha
         self.tau = tau
         self.gamma = gamma
         self.sinkhorn_eps = sinkhorn_eps
@@ -33,6 +33,8 @@ class CostDeflatedOTLoss(nn.Module):
 
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
         self.center_momentum = center_momentum
+
+        self.last_Q = None
 
     @torch.no_grad()
     def _get_top_k_vectors(self, M: torch.Tensor) -> torch.Tensor:
@@ -86,11 +88,13 @@ class CostDeflatedOTLoss(nn.Module):
             P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
 
             # 5. Mahalanobis Cost
-            S_mahalanobis = S_cent - self.lambda_penalty * P_k
+            S_mahalanobis = S_cent - self.alpha * P_k
             C_mahalanobis = 1.0 - S_mahalanobis
 
             # 6. Unbalanced Sinkhorn Target Q
             Q = self._unbalanced_sinkhorn(C_mahalanobis)
+
+            self.last_Q = Q.detach()
 
         # 7. Cross-Entropy Loss against Soft Target Q
         P_logits = S_original / self.tau

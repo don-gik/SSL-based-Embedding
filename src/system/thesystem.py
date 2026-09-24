@@ -1,4 +1,5 @@
 import lightning as L
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -21,7 +22,7 @@ class TheSystem(L.LightningModule):
         self.ema_decay = cfg.get("ema_decay", 0.99)
 
         self.s_bert, self.t_bert, self.tokenizer = self.setup_bert(
-            device_info, use_lora=True
+            device_info, use_lora=False
         )
 
         hidden_dim = self.s_bert.config.hidden_size
@@ -42,10 +43,10 @@ class TheSystem(L.LightningModule):
         self.ot_loss_fn = CostDeflatedOTLoss(
             hidden_dim=hidden_dim,
             k=cfg.get("ot_k", 3),
-            lambda_penalty=cfg.get("lambda", 0.5),
+            alpha=cfg.get("alpha", 0.15),
             tau=cfg.get("tau", 0.1),
             gamma=cfg.get("gamma", 0.9),
-            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.1),
+            sinkhorn_eps=cfg.get("sinkhorn_eps", 0.15),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 10),
             center_momentum=cfg.get("center_momentum", 0.9),
         )
@@ -86,8 +87,38 @@ class TheSystem(L.LightningModule):
         # target = torch.ones(s_embed.size(0), device=p_embed.device)
         loss = self.ot_loss_fn(s_embed, t_embed)
 
+        if self.global_step % 200 == 0 and self.ot_loss_fn.last_Q is not None:
+            self._log_q_heatmap(self.ot_loss_fn.last_Q)
+
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
+
+    def _log_q_heatmap(self, Q: torch.Tensor):
+        if not hasattr(self.logger, "experiment") or not hasattr(
+            self.logger.experiment, "add_figure"
+        ):
+            return
+
+        Q_np = Q.detach().cpu().numpy()
+
+        fig, ax = plt.subplots(figsize=(5, 4.5), dpi=100)
+        im = ax.imshow(Q_np, cmap="magma", aspect="equal", interpolation="nearest")
+
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.ax.tick_params(labelsize=8)
+
+        ax.set_title(
+            f"Target Q Matrix (Step {self.global_step})", fontsize=10, fontweight="bold"
+        )
+        ax.set_xlabel("Teacher Samples", fontsize=8)
+        ax.set_ylabel("Student Samples", fontsize=8)
+        ax.tick_params(labelsize=8)
+        plt.tight_layout()
+
+        self.logger.experiment.add_figure(
+            "OT/Q_Assignment", fig, global_step=self.global_step
+        )
+        plt.close(fig)
 
     def setup_bert(
         self, device_info, use_lora: bool = False
