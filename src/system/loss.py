@@ -16,6 +16,7 @@ class CostDeflatedOTLoss(nn.Module):
         k: int = 1,
         lambda_penalty: float = 1.0,
         tau: float = 0.1,
+        gamma: float = 0.9,
         sinkhorn_eps: float = 0.1,
         sinkhorn_iters: int = 10,
         power_iters: int = 7,
@@ -25,6 +26,7 @@ class CostDeflatedOTLoss(nn.Module):
         self.k = k
         self.lambda_penalty = lambda_penalty
         self.tau = tau
+        self.gamma = gamma
         self.sinkhorn_eps = sinkhorn_eps
         self.sinkhorn_iters = sinkhorn_iters
         self.power_iters = power_iters
