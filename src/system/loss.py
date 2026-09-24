@@ -31,6 +31,7 @@ class CostDeflatedOTLoss(nn.Module):
         self.sinkhorn_eps = sinkhorn_eps
         self.sinkhorn_iters = sinkhorn_iters
         self.power_iters = power_iters
+        self.v_ema_decay = v_ema_decay
 
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
         self.center_momentum = center_momentum
