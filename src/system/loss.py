@@ -84,7 +84,7 @@ class CostDeflatedOTLoss(nn.Module):
             P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
 
             # 5. Mahalanobis Cost
-            S_mahalanobis = S_cent - self.alpha * P_k
+            S_mahalanobis = S_cent - self.lambda_penalty * P_k
             C_mahalanobis = 1.0 - S_mahalanobis
 
             # 6. Unbalanced Sinkhorn Target Q

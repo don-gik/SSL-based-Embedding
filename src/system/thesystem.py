@@ -117,12 +117,12 @@ class TheSystem(L.LightningModule):
                     r=self.cfg.get("lora_r", 16),
                     lora_alpha=self.cfg.get("lora_alpha", 16),
                     target_modules=["query", "value"],
-                    layers_to_transform=[
+                    layers_to_transform=list(
                         range(
                             model.config.num_hidden_layers - 8,
                             model.config.num_hidden_layers,
                         )
-                    ],
+                    ),
                     lora_dropout=0.05,
                     bias="none",
                 )
