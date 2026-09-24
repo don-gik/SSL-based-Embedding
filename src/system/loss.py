@@ -14,13 +14,14 @@ class CostDeflatedOTLoss(nn.Module):
         self,
         hidden_dim: int,
         k: int = 3,
-        alpha: float = 0.15,
+        alpha: float = 0.2,
         tau: float = 0.1,
         gamma: float = 0.9,
         sinkhorn_eps: float = 0.15,
         sinkhorn_iters: int = 10,
         power_iters: int = 7,
         center_momentum: float = 0.9,
+        v_ema_decay: float = 0.98,
     ):
         super().__init__()
         self.k = k
@@ -34,19 +35,32 @@ class CostDeflatedOTLoss(nn.Module):
         self.register_buffer("t_center", torch.zeros(1, hidden_dim))
         self.center_momentum = center_momentum
 
+        self.register_buffer("V_k", None)
+
         self.last_Q = None
 
     @torch.no_grad()
     def _get_top_k_vectors(self, M: torch.Tensor) -> torch.Tensor:
         """Extracts top-k principal feature directions V_k (D, k) from Teacher embeddings via Power Iteration."""
-        _, d = M.shape
-        V = torch.randn(d, self.k, device=M.device, dtype=M.dtype)
-        V, _ = torch.linalg.qr(V)
+        d = M.size(1)
 
+        if self.V_k is None or self.V_k.shape != (d, self.k):
+            V = torch.randn(d, self.k, device=M.device, dtype=M.dtype)
+            V, _ = torch.linalg.qr(V)
+            self.V_k = V
+
+        V = self.V_k
         for _ in range(self.power_iters):
             V = M.T @ (M @ V)
             V, _ = torch.linalg.qr(V)
-        return V
+
+        if self.training:
+            V_updated = self.v_ema_decay * self.V_k + (1.0 - self.v_ema_decay) * V
+            V_ortho, _ = torch.linalg.qr(V_updated)
+            self.V_k.copy_(V_ortho)
+            return self.V_k
+        else:
+            return V
 
     @torch.no_grad()
     def _unbalanced_sinkhorn(self, C: torch.Tensor) -> torch.Tensor:
@@ -85,10 +99,16 @@ class CostDeflatedOTLoss(nn.Module):
         with torch.no_grad():
             # 4. Top-k Projection
             V_k = self._get_top_k_vectors(z_t)
-            P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
+
+            total_energy = z_t.pow(2).sum()
+            topk_energy = (z_t @ V_k).pow(2).sum()
+            energy_ratio = (topk_energy / (total_energy + 1e-8)).item()
+
+            effective_alpha = self.alpha * energy_ratio
 
             # 5. Mahalanobis Cost
-            S_mahalanobis = S_cent - self.alpha * P_k
+            P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
+            S_mahalanobis = S_cent - effective_alpha * P_k
             C_mahalanobis = 1.0 - S_mahalanobis
 
             # 6. Unbalanced Sinkhorn Target Q

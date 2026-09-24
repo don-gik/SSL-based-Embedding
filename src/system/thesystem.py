@@ -43,12 +43,13 @@ class TheSystem(L.LightningModule):
         self.ot_loss_fn = CostDeflatedOTLoss(
             hidden_dim=hidden_dim,
             k=cfg.get("ot_k", 3),
-            alpha=cfg.get("alpha", 0.15),
+            alpha=cfg.get("alpha", 0.2),
             tau=cfg.get("tau", 0.1),
             gamma=cfg.get("gamma", 0.9),
             sinkhorn_eps=cfg.get("sinkhorn_eps", 0.15),
             sinkhorn_iters=cfg.get("sinkhorn_iters", 10),
             center_momentum=cfg.get("center_momentum", 0.9),
+            v_ema_decay=cfg.get("v_ema_decay", 0.98),
         )
 
         self.grokfast = GrokfastEMA()
