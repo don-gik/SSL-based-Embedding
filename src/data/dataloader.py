@@ -77,13 +77,13 @@ def get_wikitext_sentence_dataloader(
         from src.data.collator import RepetitionShuffleCollator
 
         data_collator = RepetitionShuffleCollator(
-            tokenizer=tokenizer, rep_prob=0.1, shuffle_prob=0.0
+            tokenizer=tokenizer, rep_prob=0.05, shuffle_prob=0.0
         )
     else:
         from src.data.collator import RepetitionShuffleCollator
 
         data_collator = RepetitionShuffleCollator(
-            tokenizer=tokenizer, rep_prob=0.1, shuffle_prob=0.1
+            tokenizer=tokenizer, rep_prob=0.05, shuffle_prob=0.05
         )
 
     train_loader = DataLoader(

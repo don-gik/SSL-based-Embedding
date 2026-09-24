@@ -87,6 +87,12 @@ class CostDeflatedOTLoss(nn.Module):
         """
         z_teacher = z_teacher.detach()
 
+        if self.training:
+            batch_mean = z_teacher.mean(dim=0, keepdim=True)
+            self.t_center = self.t_center * self.center_momentum + batch_mean * (
+                1.0 - self.center_momentum
+            )
+
         # L2 Norm
         z_s = F.normalize(z_student, dim=-1)
         z_t = F.normalize(z_teacher, dim=-1)
@@ -111,6 +117,7 @@ class CostDeflatedOTLoss(nn.Module):
             P_k = (z_s_cent @ V_k) @ (z_t @ V_k).T
             S_mahalanobis = S_cent - effective_alpha * P_k
             C_mahalanobis = 1.0 - S_mahalanobis
+            C_mahalanobis = C_mahalanobis - C_mahalanobis.min()
 
             # 6. Unbalanced Sinkhorn Target Q
             Q = self._unbalanced_sinkhorn(C_mahalanobis)
