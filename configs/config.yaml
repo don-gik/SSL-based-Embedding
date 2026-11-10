@@ -1,0 +1,55 @@
+epochs: 2
+# skip HF Hub version-check requests when caches exist (first run on a fresh machine: offline=false)
+offline: true
+lr: 3e-5
+system_name: "the system"
+repetition: True
+shuffle: True
+# Augmentation strength per crop (per-token probability). With 0.05/0.05 the student crops are
+# near-identical to their teacher views, so the DINO cross-view matching task is trivially
+# satisfiable for every sentence, the loss carries no per-sentence signal, and the backbone
+# slid erank 142->40 (logit histograms: all sentences share the same near-flat logit vector).
+# 0.2/0.15 makes views genuinely differ (word repetition blocks / shuffled windows).
+rep_prob: 0.1
+shuffle_prob: 0.05
+
+# backbone / data
+data: wikitext-103-raw-v1
+model_name: bert-base-uncased
+# LoRA (Q/V of last 4 layers + LayerNorm/bias trainable) instead of full FT: the frozen
+# base weights anchor the embedding cone, so backbone erank cannot slide as fast.
+use_lora: true
+lora_r: 16
+lora_alpha: 16
+batch_size: 128
+cache_dir: ./.dataset_cache
+# MUST equal the collator's crop count (passed to dataloader in main.py)
+ncrops: 3
+
+# DINO head geometry
+out_dim: 8192
+hidden_dim: 1024
+bottleneck_dim: 256
+# BatchNorm inside the DINO head (DINO's use_bn=True variant). Without it the head's only
+# normalization is the L2 normalize before the cosine last layer, which maps the bottleneck
+# output onto a narrow cap: every sentence gets the same prototype logits, teacher entropy
+# fell to 0.5 nats and every sample shared one target (student_teacher_cos_mean 0.98,
+# cos_std 0.05). Keep true; set false to reproduce the previous run as an A/B baseline.
+head_use_bn: true
+ema_decay: 0.996
+
+# DINO-style temperature schedule (teacher starts soft, sharpens to teacher_temp)
+warmup_teacher_temp: 0.04
+teacher_temp: 0.07
+warmup_teacher_temp_epochs: 1
+student_temp: 0.1
+
+# validation cadence (STSB Evaluator) and diagnostic cadence —
+# diag_every_evals=1 means figures/histograms at EVERY eval (1000-step cadence, same x-axis).
+# Set to e.g. 3 to draw figures only every 3rd eval if the ~3s figure cost bothers you.
+eval_every_steps: 250
+diag_every_evals: 1
+# step-0 untrained baseline eval before the first batch (set false to skip/isolate stalls)
+baseline_eval: true
+# print all-thread Python stacks to stderr every N seconds (0 = off); identifies 100%-CPU threads
+stack_dump_secs: 120
